@@ -15,7 +15,7 @@ export function BranchSelector() {
 
   return (
     <div className="flex items-center">
-      <Select value={branch} onValueChange={setBranch}>
+      <Select value={branch} onValueChange={(value) => setBranch(value ?? "All")}>
         <SelectTrigger className="border-zinc-200/80 bg-white hover:bg-zinc-50 text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 rounded-2xl px-3 py-1.5 h-10 w-[200px] shadow-sm select-none shrink-0">
           <SelectValue>
             <span className="flex items-center gap-2 font-medium text-sm">

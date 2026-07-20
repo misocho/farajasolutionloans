@@ -234,7 +234,7 @@ export default function DashboardPage() {
       name: newClient.name,
       phone: newClient.phone,
       email: newClient.email || undefined,
-      sector: newClient.sector,
+      business_type: newClient.sector,
     });
   };
 

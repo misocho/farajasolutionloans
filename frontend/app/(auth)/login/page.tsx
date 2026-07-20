@@ -8,8 +8,9 @@ import { ArrowUpRight, ShieldCheck, Zap, Coins } from "lucide-react";
 import { LoginForm } from "@/features/auth/components/login-form";
 import { AppLogo } from "@/components/layout/app-logo";
 import { isAuthenticated } from "@/app/lib/auth";
+import { Suspense } from "react";
 
-export default function LoginPage() {
+function LoginContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -116,4 +117,11 @@ export default function LoginPage() {
       </div>
     </div>
   );
+}
+export default function LoginPage() {
+    return (
+        <Suspense fallback={null}>
+            <LoginContent />
+        </Suspense>
+    );
 }

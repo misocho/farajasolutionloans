@@ -43,7 +43,7 @@ export interface Client {
   school_details?: string;
   
   // Next of kin list
-  next_of_kin_list: NextOfKin[];
+  next_of_kin_list?: NextOfKin[];
   
   // Business details
   business_name?: string;
@@ -63,7 +63,7 @@ export interface Client {
   guarantor_period_known?: string;
   
   // Collateral properties
-  properties_list: PropertyItem[];
+  properties_list?: PropertyItem[];
   
   date_registered: string;
 }
