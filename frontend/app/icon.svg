@@ -1,0 +1,17 @@
+<svg viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Shield Body (Blue: #0D44A2) -->
+  <path d="M10 20C10 20 60 10 110 20C110 50 110 85 60 110C10 85 10 50 10 20Z" fill="#0D44A2" />
+
+  <!-- Handshake Icon (White) -->
+  <path d="M25 45H32V57H25V45Z" fill="white" />
+  <path d="M88 45H95V57H88V45Z" fill="white" />
+  <path d="M36 43C36 40.7909 37.7909 39 40 39H48C50.2091 39 52 40.7909 52 43V59C52 61.2091 50.2091 63 48 63H40C37.7909 63 36 61.2091 36 59V43Z" fill="white" />
+  <path d="M54 47C54 44.7909 55.7909 43 58 43H66C68.2091 43 70 44.7909 70 47V63C70 65.2091 68.2091 67 66 67H58C55.7909 67 54 65.2091 54 63V47Z" fill="white" />
+  <path d="M48 45H72V52H48V45Z" fill="white" />
+  <path d="M42 51H78V57H42V51Z" fill="white" />
+  <path d="M45 56H75V62H45V56Z" fill="white" />
+
+  <!-- Upward Zig-Zag Arrow (Orange: #F57424) -->
+  <path d="M20 90L45 65L65 75L102 38" stroke="#F57424" strokeWidth="10" strokeLinecap="round" strokeLinejoin="round" />
+  <path d="M87 37H104V54" stroke="#F57424" strokeWidth="10" strokeLinecap="round" strokeLinejoin="round" />
+</svg>
