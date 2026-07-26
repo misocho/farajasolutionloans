@@ -14,9 +14,11 @@ import {
   ShieldCheck,
   LogOut,
   MapPin,
+  Building2,
   ChevronRight,
   X,
 } from "lucide-react";
+
 import { toast } from "sonner";
 
 import { AppLogo } from "./app-logo";
@@ -87,10 +89,12 @@ export function Sidebar({ onClose }: SidebarProps) {
   ];
 
   if (isAdminRole) {
+    navItems.push({ name: "Branches", href: "/branches", icon: Building2 });
     navItems.push({ name: "Admin Console", href: "/users", icon: ShieldCheck });
   }
 
   navItems.push({ name: "Settings", href: "/settings", icon: Settings });
+
 
   const queryClient = useQueryClient();
 

@@ -1,7 +1,9 @@
 "use client";
 
 import React, { useState } from "react";
+import { useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+
 import {
   Banknote,
   Users,
@@ -31,7 +33,8 @@ import { toast } from "sonner";
 import { StatCard } from "@/components/dashboard/stat-card";
 import { QuickActions } from "@/components/dashboard/quick-actions";
 import { fetchMeApi } from "@/features/auth/api";
-import { fetchLoansApi, createLoanApi, fetchClientsApi, createClientApi, type Loan } from "@/features/clients/api";
+import { fetchLoansApi, createLoanApi, fetchClientsApi, createClientApi, createRepaymentApi, type Loan } from "@/features/clients/api";
+
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -48,6 +51,7 @@ const initialChartData = [
 
 export default function DashboardPage() {
   const queryClient = useQueryClient();
+  const router = useRouter();
   const [selectedTab, setSelectedTab] = useState("All");
 
   // In-memory addition of payments for demo simulation
@@ -238,46 +242,44 @@ export default function DashboardPage() {
     });
   };
 
-  // 3. Submit Record Repayment
-  const handleRepaymentSubmit = (e: React.FormEvent) => {
+  // 3. Submit Record Repayment — calls real backend
+  const handleRepaymentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newRepayment.loanId || !newRepayment.amount) {
       toast.error("Please specify Loan ID and Amount.");
       return;
     }
-
     setSubmitting(true);
-    setTimeout(() => {
-      const payAmount = parseFloat(newRepayment.amount);
-      setExtraRepayments((prev) => prev + payAmount);
-
+    try {
       const matchedLoan = loans.find((l) => l.id === newRepayment.loanId);
-      const clientName = matchedLoan ? matchedLoan.client : "Faraja Borrower";
-
-      const auditMsg = `Received KES ${payAmount.toLocaleString()} via ${newRepayment.method} for Loan #${newRepayment.loanId} (${clientName}).`;
-      addActivityLog("repayment", "Payment Credited", auditMsg);
-
-      toast.success("Repayment Recorded", {
-        description: `KES ${payAmount.toLocaleString()} allocated to Loan #${newRepayment.loanId}.`,
+      const clientName = matchedLoan?.client ?? "Client";
+      await createRepaymentApi({
+        loan_id: newRepayment.loanId,
+        client: clientName,
+        amount: parseFloat(newRepayment.amount),
+        mode: newRepayment.method,
+        recorded_by: `${user?.first_name ?? ""} ${user?.last_name ?? ""}`.trim() || "Loan Officer",
       });
-
+      queryClient.invalidateQueries({ queryKey: ["repayments"] });
+      queryClient.invalidateQueries({ queryKey: ["loans"] });
+      queryClient.invalidateQueries({ queryKey: ["notifications"] });
+      addActivityLog("repayment", "Payment Recorded", `KES ${parseFloat(newRepayment.amount).toLocaleString()} recorded for Loan ${newRepayment.loanId} — awaiting verification.`);
+      toast.success("Payment recorded", { description: "Awaiting Manager/Director verification." });
       setNewRepayment({ loanId: "", amount: "", method: "M-Pesa" });
-      setSubmitting(false);
       setActiveModal(null);
-    }, 1200);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail ?? "Failed to record payment");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
-  // 4. Report simulation
+  // 4. Generate Report — navigate to reports page
   const handleGenerateReportClick = () => {
-    toast.promise(
-      new Promise((resolve) => setTimeout(resolve, 2000)),
-      {
-        loading: "Compiling financial audit report (PDF)...",
-        success: "Audit report generated! Check your downloads folder.",
-        error: "Failed to download audit logs.",
-      }
-    );
+    router.push("/reports");
+    toast.info("Opening Reports", { description: "Live portfolio and arrears data ready." });
   };
+
 
   const handleActionTrigger = (actionType: typeof activeModal) => {
     if (actionType === "Generate Report") {

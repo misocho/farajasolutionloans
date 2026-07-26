@@ -42,6 +42,8 @@ export function Topbar({ onMenuClick }: TopbarProps) {
         return "Repayments & Receipts";
       case "reports":
         return "Financial Reports";
+      case "branches":
+        return "Branch Network";
       case "settings":
         return "System Settings";
       case "users":

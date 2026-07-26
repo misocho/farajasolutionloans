@@ -234,3 +234,73 @@ export async function createClientApi(data: ClientCreateData): Promise<Client> {
   const res = await api.post<Client>("/clients", data);
   return res.data;
 }
+
+// ── Branch API ────────────────────────────────────────────────────────────────
+
+export interface BranchStats {
+  total_clients: number;
+  active_loans: number;
+  disbursed_amount: number;
+  collected_amount: number;
+  overdue_loans: number;
+}
+
+export interface Branch {
+  id: string;
+  name: string;
+  location: string;
+  manager_name: string;
+  manager_phone: string;
+  phone: string;
+  email: string;
+  is_active: boolean;
+  created_at: string;
+  stats: BranchStats;
+}
+
+export type BranchCreateData = Omit<Branch, "id" | "created_at" | "stats">;
+
+export async function fetchBranchesApi(): Promise<Branch[]> {
+  const res = await api.get<Branch[]>("/branches");
+  return res.data;
+}
+
+export async function createBranchApi(data: Partial<BranchCreateData>): Promise<Branch> {
+  const res = await api.post<Branch>("/branches", data);
+  return res.data;
+}
+
+export async function updateBranchApi(id: string, data: Partial<BranchCreateData>): Promise<Branch> {
+  const res = await api.patch<Branch>(`/branches/${id}`, data);
+  return res.data;
+}
+
+export async function deactivateBranchApi(id: string): Promise<{ status: string; message: string }> {
+  const res = await api.delete(`/branches/${id}`);
+  return res.data;
+}
+
+// ── Notifications API ─────────────────────────────────────────────────────────
+
+export interface AppNotification {
+  id: string;
+  type: string;
+  title: string;
+  description: string;
+  time: string;
+  read: boolean;
+  priority: "critical" | "high" | "medium" | "low";
+  loan_id?: string;
+  repayment_id?: string;
+}
+
+export interface NotificationsResponse {
+  notifications: AppNotification[];
+  unread_count: number;
+  total: number;
+}
+
+export async function fetchNotificationsApi(): Promise<NotificationsResponse> {
+  const res = await api.get<NotificationsResponse>("/notifications");
+  return res.data;
+}

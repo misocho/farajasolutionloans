@@ -7,8 +7,10 @@ import { Loader2 } from "lucide-react";
 
 import { Sidebar } from "@/components/layout/sidebar";
 import { Topbar } from "@/components/layout/topbar";
+import { BranchProvider } from "@/components/layout/branch-selector";
 import { getToken, clearToken } from "@/app/lib/auth";
 import { fetchMeApi } from "@/features/auth/api";
+
 
 export default function DashboardLayout({
   children,
@@ -59,36 +61,38 @@ export default function DashboardLayout({
   }
 
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-zinc-50 dark:bg-zinc-950 font-sans">
-      {/* ── Mobile overlay backdrop ── */}
-      {sidebarOpen && (
+    <BranchProvider>
+      <div className="flex h-screen w-full overflow-hidden bg-zinc-50 dark:bg-zinc-950 font-sans">
+        {/* ── Mobile overlay backdrop ── */}
+        {sidebarOpen && (
+          <div
+            className="fixed inset-0 z-30 bg-zinc-950/50 backdrop-blur-sm lg:hidden"
+            onClick={() => setSidebarOpen(false)}
+          />
+        )}
+
+        {/* ── Sidebar (fixed on desktop, drawer on mobile) ── */}
         <div
-          className="fixed inset-0 z-30 bg-zinc-950/50 backdrop-blur-sm lg:hidden"
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
+          className={`
+            fixed inset-y-0 left-0 z-40 lg:static lg:z-auto
+            transform transition-transform duration-300 ease-in-out
+            ${sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}
+          `}
+        >
+          <Sidebar onClose={() => setSidebarOpen(false)} />
+        </div>
 
-      {/* ── Sidebar (fixed on desktop, drawer on mobile) ── */}
-      <div
-        className={`
-          fixed inset-y-0 left-0 z-40 lg:static lg:z-auto
-          transform transition-transform duration-300 ease-in-out
-          ${sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}
-        `}
-      >
-        <Sidebar onClose={() => setSidebarOpen(false)} />
+        {/* ── Main Workspace Column ── */}
+        <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+          {/* Header bar */}
+          <Topbar onMenuClick={() => setSidebarOpen((o) => !o)} />
+
+          {/* Scrollable Content Container */}
+          <main className="flex-1 overflow-y-auto bg-[#F8FAFC] dark:bg-zinc-950 p-4 sm:p-6">
+            {children}
+          </main>
+        </div>
       </div>
-
-      {/* ── Main Workspace Column ── */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        {/* Header bar */}
-        <Topbar onMenuClick={() => setSidebarOpen((o) => !o)} />
-
-        {/* Scrollable Content Container */}
-        <main className="flex-1 overflow-y-auto bg-[#F8FAFC] dark:bg-zinc-950 p-4 sm:p-6">
-          {children}
-        </main>
-      </div>
-    </div>
+    </BranchProvider>
   );
 }
