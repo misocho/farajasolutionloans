@@ -1,11 +1,25 @@
 import api from "@/app/lib/api";
 
+// ── Sub-types ────────────────────────────────────────────────────────────────
+
 export interface NextOfKin {
   fullName: string;
   idNo?: string;
   relationship: string;
   phone: string;
   address?: string;
+  occupation?: string;
+  school_note?: string;
+}
+
+export interface Dependant {
+  fullName: string;
+  age: string;
+  relationship: string;
+  is_school_going: boolean;
+  school_name?: string;
+  school_grade?: string;
+  occupation?: string;
 }
 
 export interface PropertyItem {
@@ -14,6 +28,55 @@ export interface PropertyItem {
   serialNo?: string;
   estValue: string;
 }
+
+export interface Repayment {
+  id: string;
+  loan_id: string;
+  client: string;
+  amount: number;
+  date: string;
+  mode: string;
+  reference: string;
+  recorded_by?: string;
+  verified: boolean;
+  verified_by?: string | null;
+  verified_at?: string | null;
+}
+
+// ── Loan Interface ────────────────────────────────────────────────────────────
+
+export type LoanStatus = "Pending" | "Approved" | "Disbursed" | "Rejected" | "Closed";
+
+export interface Loan {
+  id: string;
+  client: string;
+  sector: string;
+  amount: number;
+  duration_days: number;
+  application_fee: number;
+  notes?: string;
+  submitted_by?: string;
+  approved_by?: string | null;
+  disbursed_by?: string | null;
+  approval_note?: string | null;
+  rejection_reason?: string | null;
+  date: string;
+  disbursed_date?: string | null;
+  due_date?: string | null;
+  status: LoanStatus;
+  // Computed fields from backend
+  interest_amount: number;
+  total_repayable: number;
+  amount_repaid: number;
+  outstanding: number;
+  is_overdue: boolean;
+  days_overdue: number;
+  penalty_amount: number;
+  // When fetched by ID
+  repayments?: Repayment[];
+}
+
+// ── Client Interface ─────────────────────────────────────────────────────────
 
 export interface Client {
   id: string;
@@ -29,53 +92,145 @@ export interface Client {
   period_years?: string;
   accommodation?: string;
   landmark?: string;
-  
-  // Spouse details
   spouse_name?: string;
   spouse_id?: string;
   spouse_phone?: string;
   spouse_occupation?: string;
-  
-  // Dependants
+  spouse_address?: string;
+  applicant_dependants?: Dependant[];
+  spouse_dependants?: Dependant[];
   dependants_count?: string;
   dependants_ages?: string;
   school_going_count?: string;
   school_details?: string;
-  
-  // Next of kin list
   next_of_kin_list?: NextOfKin[];
-  
-  // Business details
   business_name?: string;
   business_type: string;
+  business_sector_custom?: string;
   business_landmark?: string;
   business_years?: string;
   business_location?: string;
-  
-  // Guarantor details
   guarantor_surname?: string;
   guarantor_first_name?: string;
   guarantor_middle_name?: string;
+  guarantor_id_no?: string;
   guarantor_phone?: string;
   guarantor_relationship?: string;
   guarantor_address?: string;
   guarantor_occupation?: string;
   guarantor_period_known?: string;
-  
-  // Collateral properties
   properties_list?: PropertyItem[];
-  
+  applicant_id_photo?: string;
+  applicant_passport_photo?: string;
+  guarantor_id_photo?: string;
+  guarantor_passport_photo?: string;
+  applicant_signature?: string;
+  guarantor_signature?: string;
+  registration_fee?: number;
+  application_fee?: number;
   date_registered: string;
 }
 
 export type ClientCreateData = Omit<Client, "id" | "date_registered">;
 
+// ── Fee Constants ────────────────────────────────────────────────────────────
+
+export const CLIENT_REGISTRATION_FEE = 1000;
+export const LOAN_APPLICATION_FEE = 500;
+export const INTEREST_RATE = 0.20;       // 20% flat
+export const PENALTY_RATE = 0.03;        // 3% per 2 days overdue
+
+// ── API Functions ────────────────────────────────────────────────────────────
+
+export async function fetchLoansApi(): Promise<Loan[]> {
+  const res = await api.get<Loan[]>("/loans");
+  return res.data;
+}
+
+export async function fetchLoanApi(id: string): Promise<Loan> {
+  const res = await api.get<Loan>(`/loans/${id}`);
+  return res.data;
+}
+
+export async function createLoanApi(data: {
+  client: string; sector: string; amount: number;
+  duration_days: number; application_fee?: number;
+  notes?: string; submitted_by?: string;
+}): Promise<Loan> {
+  const res = await api.post<Loan>("/loans", data);
+  return res.data;
+}
+
+export async function approveLoanApi(id: string, note?: string, officer_name?: string): Promise<Loan> {
+  const res = await api.patch<Loan>(`/loans/${id}/approve`, { note, officer_name });
+  return res.data;
+}
+
+export async function rejectLoanApi(id: string, note: string, officer_name?: string): Promise<Loan> {
+  const res = await api.patch<Loan>(`/loans/${id}/reject`, { note, officer_name });
+  return res.data;
+}
+
+export async function disburseLoanApi(id: string, officer_name?: string, duration_days?: number): Promise<Loan> {
+  const res = await api.patch<Loan>(`/loans/${id}/disburse`, { officer_name, duration_days });
+  return res.data;
+}
+
+export async function closeLoanApi(id: string, officer_name?: string): Promise<Loan> {
+  const res = await api.patch<Loan>(`/loans/${id}/close`, { officer_name });
+  return res.data;
+}
+
+// ── Repayment API ────────────────────────────────────────────────────────────
+
+export async function fetchRepaymentsApi(loan_id?: string): Promise<Repayment[]> {
+  const res = await api.get<Repayment[]>("/repayments", { params: loan_id ? { loan_id } : {} });
+  return res.data;
+}
+
+export async function createRepaymentApi(data: {
+  loan_id: string; client: string; amount: number;
+  mode: string; reference?: string; recorded_by?: string;
+}): Promise<Repayment> {
+  const res = await api.post<Repayment>("/repayments", data);
+  return res.data;
+}
+
+export async function verifyRepaymentApi(id: string, verified_by: string): Promise<Repayment> {
+  const res = await api.patch<Repayment>(`/repayments/${id}/verify`, { verified_by });
+  return res.data;
+}
+
+// ── Report API ───────────────────────────────────────────────────────────────
+
+export async function fetchPortfolioReportApi() {
+  const res = await api.get("/reports/portfolio");
+  return res.data;
+}
+
+export async function fetchArrearsReportApi() {
+  const res = await api.get("/reports/arrears");
+  return res.data;
+}
+
+export async function fetchCollectionsReportApi(date_from?: string, date_to?: string) {
+  const res = await api.get("/reports/collections", { params: { date_from, date_to } });
+  return res.data;
+}
+
+export async function fetchClientsReportApi() {
+  const res = await api.get("/reports/clients");
+  return res.data;
+}
+
+// ── Client API ───────────────────────────────────────────────────────────────
+
 export async function fetchClientsApi(): Promise<Client[]> {
-  const response = await api.get<Client[]>("/clients");
-  return response.data;
+  const res = await api.get<Client[]>("/clients");
+  return res.data;
 }
 
 export async function createClientApi(data: ClientCreateData): Promise<Client> {
-  const response = await api.post<Client>("/clients", data);
-  return response.data;
+  const res = await api.post<Client>("/clients", data);
+  return res.data;
 }

@@ -31,8 +31,7 @@ import { toast } from "sonner";
 import { StatCard } from "@/components/dashboard/stat-card";
 import { QuickActions } from "@/components/dashboard/quick-actions";
 import { fetchMeApi } from "@/features/auth/api";
-import { fetchLoansApi, createLoanApi, type Loan } from "@/features/loans/api";
-import { fetchClientsApi, createClientApi, type Client } from "@/features/clients/api";
+import { fetchLoansApi, createLoanApi, fetchClientsApi, createClientApi, type Loan } from "@/features/clients/api";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -219,6 +218,7 @@ export default function DashboardPage() {
       client: newLoan.client,
       sector: newLoan.sector,
       amount: parseFloat(newLoan.amount),
+      duration_days: 90,
     });
   };
 
@@ -300,19 +300,19 @@ export default function DashboardPage() {
   };
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto pb-10 text-left relative select-none">
+    <div className="space-y-4 sm:space-y-6 max-w-7xl mx-auto pb-10 text-left relative select-none">
       {/* Welcome Banner */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800 p-6 rounded-[24px] shadow-sm">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800 p-4 sm:p-6 rounded-[20px] sm:rounded-[24px] shadow-sm">
         <div>
-          <h2 className="text-2xl font-black text-zinc-900 dark:text-zinc-50 tracking-tight flex items-center gap-2">
+          <h2 className="text-lg sm:text-2xl font-black text-zinc-900 dark:text-zinc-50 tracking-tight flex items-center gap-2">
             <span>{getGreeting()}, {user?.first_name || "System"}!</span>
             <span className="inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500 animate-ping" />
           </h2>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
-            Here is your credit management activity summary for today, {new Date().toLocaleDateString("en-US", {
-              weekday: "long",
+          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 leading-snug">
+            Credit activity summary for {new Date().toLocaleDateString("en-US", {
+              weekday: "short",
               year: "numeric",
-              month: "long",
+              month: "short",
               day: "numeric",
             })}.
           </p>
@@ -324,7 +324,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Stat Cards Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <StatCard
           title="Active Portfolio"
           value={`KES ${getActivePortfolio().toLocaleString()}`}
@@ -364,11 +364,11 @@ export default function DashboardPage() {
       </div>
 
       {/* Main Grid Content */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
         {/* Left Column (Charts & Tables) - Span 2 */}
-        <div className="lg:col-span-2 space-y-6 flex flex-col">
+        <div className="lg:col-span-2 space-y-4 sm:space-y-6 flex flex-col">
           {/* Recharts Performance Dynamics */}
-          <div className="bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800 p-5 rounded-[24px] shadow-sm flex flex-col gap-4">
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800 p-4 sm:p-5 rounded-[20px] sm:rounded-[24px] shadow-sm flex flex-col gap-4">
             <div className="flex items-center justify-between">
               <div className="flex flex-col text-left">
                 <h3 className="font-bold text-zinc-900 dark:text-zinc-50 text-base">Lending Dynamics</h3>
@@ -377,7 +377,7 @@ export default function DashboardPage() {
             </div>
             
             {/* Chart Area */}
-            <div className="h-72 w-full text-xs mt-2">
+            <div className="h-52 sm:h-72 w-full text-xs mt-2">
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={getDynamicChartData()} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                   <defs>
@@ -417,7 +417,7 @@ export default function DashboardPage() {
           </div>
 
           {/* Recent Loans Application Registry */}
-          <div className="bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800 p-5 rounded-[24px] shadow-sm flex flex-col gap-4 flex-1">
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800 p-4 sm:p-5 rounded-[20px] sm:rounded-[24px] shadow-sm flex flex-col gap-4 flex-1">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-zinc-100 dark:border-zinc-850 pb-3">
               <div className="flex flex-col text-left">
                 <h3 className="font-bold text-zinc-900 dark:text-zinc-50 text-base">Recent Loan Applications</h3>
@@ -443,13 +443,13 @@ export default function DashboardPage() {
             </div>
 
             {/* Table */}
-            <div className="overflow-x-auto w-full">
+            <div className="overflow-x-auto w-full -mx-4 sm:mx-0 px-4 sm:px-0">
               {loansLoading ? (
                 <div className="flex justify-center items-center py-10">
                   <Loader2 className="animate-spin text-primary size-6" />
                 </div>
               ) : (
-                <table className="w-full text-xs text-left border-collapse">
+                <table className="w-full text-xs text-left border-collapse min-w-[520px]">
                   <thead>
                     <tr className="border-b border-zinc-100 dark:border-zinc-850 text-zinc-400 font-bold">
                       <th className="py-3 px-2">Loan ID</th>
@@ -493,12 +493,12 @@ export default function DashboardPage() {
         </div>
 
         {/* Right Column (Quick Actions & Recent Activity Logs) */}
-        <div className="space-y-6">
+        <div className="space-y-4 sm:space-y-6">
           {/* Quick Actions Panel with Callback */}
           <QuickActions onActionClick={handleActionTrigger} />
 
           {/* Audit Logs / Activity logs */}
-          <div className="bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800 p-5 rounded-[24px] shadow-sm flex flex-col gap-4">
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800 p-4 sm:p-5 rounded-[20px] sm:rounded-[24px] shadow-sm flex flex-col gap-4">
             <div className="flex items-center justify-between">
               <div className="flex flex-col text-left">
                 <h3 className="font-bold text-zinc-900 dark:text-zinc-50 text-base">Recent Activities</h3>
@@ -546,8 +546,8 @@ export default function DashboardPage() {
 
       {/* 1. Modal: Apply for Loan */}
       {activeModal === "Apply for Loan" && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/40 backdrop-blur-xs animate-fade-in">
-          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-[28px] p-6 w-full max-w-md shadow-2xl animate-in fade-in-50 zoom-in-95 duration-200">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-zinc-950/40 backdrop-blur-xs animate-fade-in">
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-t-[28px] sm:rounded-[28px] p-6 w-full sm:max-w-md shadow-2xl animate-in slide-in-from-bottom sm:fade-in-50 sm:zoom-in-95 duration-200">
             <div className="flex justify-between items-center border-b border-zinc-100 dark:border-zinc-800 pb-3">
               <h3 className="font-bold text-zinc-900 dark:text-zinc-50 text-lg">Apply for Business Loan</h3>
               <button onClick={() => setActiveModal(null)} className="p-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full cursor-pointer focus:outline-none">
@@ -619,8 +619,8 @@ export default function DashboardPage() {
 
       {/* 2. Modal: Register Client */}
       {activeModal === "Register Client" && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/40 backdrop-blur-xs animate-fade-in">
-          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-[28px] p-6 w-full max-w-md shadow-2xl animate-in fade-in-50 zoom-in-95 duration-200">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-zinc-950/40 backdrop-blur-xs animate-fade-in">
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-t-[28px] sm:rounded-[28px] p-6 w-full sm:max-w-md shadow-2xl animate-in slide-in-from-bottom sm:fade-in-50 sm:zoom-in-95 duration-200">
             <div className="flex justify-between items-center border-b border-zinc-100 dark:border-zinc-800 pb-3">
               <h3 className="font-bold text-zinc-900 dark:text-zinc-50 text-lg">Onboard New Client</h3>
               <button onClick={() => setActiveModal(null)} className="p-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full cursor-pointer focus:outline-none">
@@ -699,8 +699,8 @@ export default function DashboardPage() {
 
       {/* 3. Modal: Record Repayment */}
       {activeModal === "Record Repayment" && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/40 backdrop-blur-xs animate-fade-in">
-          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-[28px] p-6 w-full max-w-md shadow-2xl animate-in fade-in-50 zoom-in-95 duration-200">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-zinc-950/40 backdrop-blur-xs animate-fade-in">
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-t-[28px] sm:rounded-[28px] p-6 w-full sm:max-w-md shadow-2xl animate-in slide-in-from-bottom sm:fade-in-50 sm:zoom-in-95 duration-200">
             <div className="flex justify-between items-center border-b border-zinc-100 dark:border-zinc-800 pb-3">
               <h3 className="font-bold text-zinc-900 dark:text-zinc-50 text-lg">Record Client Repayment</h3>
               <button onClick={() => setActiveModal(null)} className="p-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full cursor-pointer focus:outline-none">

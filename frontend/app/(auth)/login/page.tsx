@@ -31,17 +31,17 @@ function LoginContent() {
   return (
     <div className="flex min-h-screen w-full bg-zinc-50 dark:bg-zinc-950 font-sans">
       {/* Left Column: Form Section */}
-      <div className="flex flex-1 flex-col justify-center px-6 py-12 sm:px-12 md:px-20 lg:flex-none lg:w-[480px] xl:w-[540px] bg-white dark:bg-zinc-900 border-r border-zinc-100 dark:border-zinc-800 shadow-xl">
-        <div className="mx-auto w-full max-w-sm lg:w-96 flex flex-col justify-between h-full">
+      <div className="flex flex-1 flex-col justify-center px-5 py-10 sm:px-12 md:px-16 lg:flex-none lg:w-[480px] xl:w-[540px] bg-white dark:bg-zinc-900 border-r border-zinc-100 dark:border-zinc-800 shadow-xl">
+        <div className="mx-auto w-full max-w-sm flex flex-col justify-between min-h-full">
           {/* Header */}
-          <div className="flex flex-col pt-4">
+          <div className="flex flex-col pt-2 sm:pt-4">
             <AppLogo size="md" />
-            <div className="mt-10">
-              <h2 className="text-3xl font-extrabold tracking-tight text-zinc-900 dark:text-zinc-50">
+            <div className="mt-8 sm:mt-10">
+              <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-zinc-900 dark:text-zinc-50">
                 Welcome Back
               </h2>
               <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
-                Please enter your employee credentials to access the credit management portal.
+                Enter your employee credentials to access the credit management portal.
               </p>
             </div>
           </div>
@@ -52,7 +52,7 @@ function LoginContent() {
           </div>
 
           {/* Footer */}
-          <div className="pt-8 text-center lg:text-left">
+          <div className="pt-6 sm:pt-8 text-center lg:text-left">
             <p className="text-xs text-zinc-400 dark:text-zinc-500">
               Faraja Solutions &copy; {new Date().getFullYear()}. All rights reserved.
             </p>
@@ -60,7 +60,7 @@ function LoginContent() {
         </div>
       </div>
 
-      {/* Right Column: Visual Dashboard Showcase */}
+      {/* Right Column: Visual Dashboard Showcase — only on large screens */}
       <div className="hidden lg:flex flex-1 relative items-center justify-center bg-zinc-50 dark:bg-zinc-950 overflow-hidden">
         {/* Soft Modern Gradients */}
         <div className="absolute inset-0 bg-gradient-to-br from-[#0D44A2]/5 via-transparent to-[#F57424]/5" />
@@ -75,7 +75,7 @@ function LoginContent() {
           </div>
 
           <h1 className="text-4xl font-extrabold tracking-tight text-zinc-900 dark:text-zinc-50 sm:text-5xl leading-[1.1]">
-            Empowering Kenyan SMEs with <span className="text-[#0D44A2]">Fast</span> & <span className="text-[#F57424]">Secure</span> Credit
+            Empowering Kenyan SMEs with <span className="text-[#0D44A2]">Fast</span> &amp; <span className="text-[#F57424]">Secure</span> Credit
           </h1>
           <p className="mt-4 text-lg text-zinc-600 dark:text-zinc-400 max-w-lg">
             Manage loan disbursements, client profiles, and repayments seamlessly through a consolidated micro-finance dashboard.
@@ -89,7 +89,7 @@ function LoginContent() {
               </div>
               <div>
                 <h3 className="font-bold text-zinc-800 dark:text-zinc-200">Secure Approval Limits</h3>
-                <p className="text-xs text-zinc-500 mt-0.5">Role-based controls & thresholds.</p>
+                <p className="text-xs text-zinc-500 mt-0.5">Role-based controls &amp; thresholds.</p>
               </div>
             </div>
 

@@ -17,8 +17,8 @@ export default function DashboardLayout({
 }) {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  // Perform client-side token check immediately on mount
   useEffect(() => {
     setMounted(true);
     const token = getToken();
@@ -27,24 +27,21 @@ export default function DashboardLayout({
     }
   }, [router]);
 
-  // Fetch current user details via React Query
   const { isPending, isError } = useQuery({
     queryKey: ["me"],
     queryFn: fetchMeApi,
     retry: false,
     enabled: mounted && !!getToken(),
-    staleTime: 5 * 60 * 1000, // cache for 5 minutes
+    staleTime: 5 * 60 * 1000,
   });
 
-  // Handle query load failures by routing back to login
   useEffect(() => {
     if (isError) {
-      clearToken(); // Clear token to prevent infinite redirect loops!
+      clearToken();
       router.replace("/login?expired=true");
     }
   }, [isError, router]);
 
-  // Show a beautiful, centered loading spinner on initial authentication checks
   if (!mounted || isPending) {
     return (
       <div className="flex h-screen w-full flex-col items-center justify-center bg-zinc-50 dark:bg-zinc-950 font-sans gap-4">
@@ -63,16 +60,32 @@ export default function DashboardLayout({
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-zinc-50 dark:bg-zinc-950 font-sans">
-      {/* Sidebar Navigation */}
-      <Sidebar />
+      {/* ── Mobile overlay backdrop ── */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-zinc-950/50 backdrop-blur-sm lg:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
 
-      {/* Main Workspace Column */}
+      {/* ── Sidebar (fixed on desktop, drawer on mobile) ── */}
+      <div
+        className={`
+          fixed inset-y-0 left-0 z-40 lg:static lg:z-auto
+          transform transition-transform duration-300 ease-in-out
+          ${sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}
+        `}
+      >
+        <Sidebar onClose={() => setSidebarOpen(false)} />
+      </div>
+
+      {/* ── Main Workspace Column ── */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Header bar */}
-        <Topbar />
+        <Topbar onMenuClick={() => setSidebarOpen((o) => !o)} />
 
         {/* Scrollable Content Container */}
-        <main className="flex-1 overflow-y-auto bg-[#F8FAFC] dark:bg-zinc-950 p-6">
+        <main className="flex-1 overflow-y-auto bg-[#F8FAFC] dark:bg-zinc-950 p-4 sm:p-6">
           {children}
         </main>
       </div>

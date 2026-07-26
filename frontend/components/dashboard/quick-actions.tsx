@@ -55,35 +55,36 @@ export function QuickActions({ onActionClick }: QuickActionsProps) {
   };
 
   return (
-    <div className="bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800 p-5 rounded-[24px] shadow-sm flex flex-col gap-4">
+    <div className="bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800 p-4 sm:p-5 rounded-[20px] sm:rounded-[24px] shadow-sm flex flex-col gap-3 sm:gap-4">
       <div className="flex flex-col text-left">
-        <h3 className="font-bold text-zinc-900 dark:text-zinc-50 text-base">Quick Actions</h3>
+        <h3 className="font-bold text-zinc-900 dark:text-zinc-50 text-sm sm:text-base">Quick Actions</h3>
         <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-0.5">Frequent tasks and workflows</p>
       </div>
 
-      <div className="flex flex-col gap-2">
+      {/* 2-col grid on mobile, list on tablet/desktop */}
+      <div className="grid grid-cols-2 sm:grid-cols-1 gap-2">
         {actions.map((act) => {
           const Icon = act.icon;
           return (
             <button
               key={act.title}
               onClick={() => handleClick(act)}
-              className="flex items-center justify-between p-3 rounded-2xl border border-zinc-100 hover:border-zinc-200 dark:border-zinc-800 dark:hover:border-zinc-700 bg-zinc-50/50 hover:bg-zinc-50 dark:bg-zinc-900/20 dark:hover:bg-zinc-900/60 transition-all duration-200 group text-left cursor-pointer focus:outline-none"
+              className="flex sm:flex-row flex-col items-center sm:justify-between p-3 rounded-2xl border border-zinc-100 hover:border-zinc-200 dark:border-zinc-800 dark:hover:border-zinc-700 bg-zinc-50/50 hover:bg-zinc-50 dark:bg-zinc-900/20 dark:hover:bg-zinc-900/60 transition-all duration-200 group text-left cursor-pointer focus:outline-none gap-2 sm:gap-0"
             >
-              <div className="flex items-center gap-3">
+              <div className="flex flex-col sm:flex-row items-center sm:items-center gap-2 sm:gap-3 w-full">
                 <div className={`p-2.5 rounded-xl shrink-0 transition-transform group-hover:scale-105 ${act.bgColor} ${act.iconColor}`}>
                   <Icon className="size-4" />
                 </div>
-                <div className="flex flex-col leading-none">
-                  <span className="text-xs font-bold text-zinc-950 dark:text-zinc-100">
+                <div className="flex flex-col leading-none text-center sm:text-left">
+                  <span className="text-[10px] sm:text-xs font-bold text-zinc-950 dark:text-zinc-100">
                     {act.title}
                   </span>
-                  <span className="text-[10px] text-zinc-400 mt-0.5">
+                  <span className="text-[9px] sm:text-[10px] text-zinc-400 mt-0.5 hidden sm:block">
                     {act.description}
                   </span>
                 </div>
               </div>
-              <ChevronRight className="size-4 text-zinc-350 dark:text-zinc-650 group-hover:translate-x-0.5 transition-transform" />
+              <ChevronRight className="size-4 text-zinc-350 dark:text-zinc-650 group-hover:translate-x-0.5 transition-transform hidden sm:block shrink-0" />
             </button>
           );
         })}

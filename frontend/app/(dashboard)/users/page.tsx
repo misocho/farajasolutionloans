@@ -52,28 +52,37 @@ export default function UsersAdminPage() {
     queryFn: fetchMeApi,
   });
 
-  // Verify access level: user must have the Director role
-  const isDirector = currentUser?.status === "Active" || currentUser?.first_name; // Fallback or direct check
-  const rolesList = currentUser?.id ? ["Director"] : []; // We know Director FS-DIR001 is director
-  const userIsDirector = currentUser?.employee_number === "FS-DIR001"; // Strict check for System Director credentials
+  // Verify access level using role-based check (consistent with sidebar)
+  const getRole = (u: any): string => {
+    if (!u) return "";
+    if (u.roles && u.roles.length > 0) return u.roles[0].role.name;
+    if (u.employee_number?.includes("DIR")) return "Director";
+    if (u.employee_number?.includes("SYS")) return "System Admin";
+    return "";
+  };
+
+  const userRole = getRole(currentUser);
+  const userIsAdmin = currentUser !== undefined && (
+    userRole === "Director" || userRole === "System Admin"
+  );
 
   // 2. Fetch admin data
   const { data: users, isLoading: usersLoading } = useQuery({
     queryKey: ["admin-users"],
     queryFn: fetchAdminUsersApi,
-    enabled: userIsDirector,
+    enabled: userIsAdmin,
   });
 
   const { data: roles, isLoading: rolesLoading } = useQuery({
     queryKey: ["admin-roles"],
     queryFn: fetchAdminRolesApi,
-    enabled: userIsDirector,
+    enabled: userIsAdmin,
   });
 
   const { data: permissions } = useQuery({
     queryKey: ["admin-permissions"],
     queryFn: fetchAdminPermissionsApi,
-    enabled: userIsDirector,
+    enabled: userIsAdmin,
   });
 
   // Query permissions for active role in the matrix editor
@@ -121,7 +130,7 @@ export default function UsersAdminPage() {
   });
 
   // Security Lock check: Redirect/Lock screen if unauthorized
-  if (currentUser && !userIsDirector) {
+  if (currentUser && !userIsAdmin) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[70vh] p-8 text-center bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800 rounded-[28px] max-w-xl mx-auto shadow-md">
         <div className="p-4 bg-rose-500/10 text-rose-500 rounded-3xl mb-6">
