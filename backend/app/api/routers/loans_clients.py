@@ -77,9 +77,22 @@ class LoanCreateRequest(BaseModel):
     sector: str
     amount: float
     duration_days: int = 90               # Set by LO at application time
-    application_fee: float = 500.0
+    application_fee: Optional[float] = None
     notes: Optional[str] = None
     submitted_by: Optional[str] = None
+
+
+def calc_application_fee(client_name: str, amount: float) -> float:
+    name_clean = client_name.strip().lower()
+    is_existing = any(c.get("name", "").strip().lower() == name_clean for c in MOCK_CLIENTS) or \
+                  any(l.get("client", "").strip().lower() == name_clean for l in MOCK_LOANS)
+    
+    if 4000 <= amount <= 10000:
+        return 600.0 if is_existing else 800.0
+    elif amount > 10000:
+        return 1000.0 if is_existing else 1500.0
+    return 500.0
+
 
 
 class LoanActionRequest(BaseModel):
@@ -457,7 +470,7 @@ def create_loan(request: LoanCreateRequest):
         "sector": request.sector,
         "amount": request.amount,
         "duration_days": request.duration_days,
-        "application_fee": request.application_fee,
+        "application_fee": request.application_fee if request.application_fee is not None else calc_application_fee(request.client, request.amount),
         "notes": request.notes or "",
         "submitted_by": request.submitted_by or "Loan Officer",
         "approved_by": None,

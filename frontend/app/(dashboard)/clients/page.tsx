@@ -556,13 +556,17 @@ export default function ClientsPage() {
     occupation: "",
   });
 
-  // ── Step 7: Documents ──────────────────────────────────────────────────────
+  // ── Step 7: Documents & Fee Bracket ──────────────────────────────────────────
+  const [loanBracket, setLoanBracket] = useState<"4-10k" | "above10k">("4-10k");
+  const currentAppFee = loanBracket === "4-10k" ? 800 : 1500;
+
   const [applicantIdPhoto, setApplicantIdPhoto] = useState("");
   const [applicantPassportPhoto, setApplicantPassportPhoto] = useState("");
   const [guarantorIdPhoto, setGuarantorIdPhoto] = useState("");
   const [guarantorPassportPhoto, setGuarantorPassportPhoto] = useState("");
   const [applicantSignature, setApplicantSignature] = useState("");
   const [guarantorSignature, setGuarantorSignature] = useState("");
+
 
   // ── Mutation ───────────────────────────────────────────────────────────────
   const clientMutation = useMutation({
@@ -699,9 +703,10 @@ export default function ClientsPage() {
       guarantor_signature: guarantorSignature || undefined,
 
       registration_fee: CLIENT_REGISTRATION_FEE,
-      application_fee: LOAN_APPLICATION_FEE,
+      application_fee: currentAppFee,
     });
   };
+
 
   // ── Reset ───────────────────────────────────────────────────────────────────
   const resetForm = () => {
@@ -1256,27 +1261,38 @@ export default function ClientsPage() {
 
                   {/* Fee Summary */}
                   <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 rounded-2xl p-4 space-y-2">
-                    <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400 font-bold text-xs">
-                      <Receipt className="size-3.5" />
-                      <span>Fee Summary — Manual Verification Required</span>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400 font-bold text-xs">
+                        <Receipt className="size-3.5" />
+                        <span>Fee Summary — Manual Verification</span>
+                      </div>
+                      <select
+                        value={loanBracket}
+                        onChange={(e) => setLoanBracket(e.target.value as "4-10k" | "above10k")}
+                        className="bg-white dark:bg-zinc-900 border border-amber-200 dark:border-amber-800 rounded-lg text-[11px] font-bold px-2 py-0.5 text-amber-900 dark:text-amber-200"
+                      >
+                        <option value="4-10k">Loan 4K - 10K (Fee: KES 800)</option>
+                        <option value="above10k">Loan &gt; 10K (Fee: KES 1,500)</option>
+                      </select>
                     </div>
                     <div className="flex justify-between text-xs">
                       <span className="text-amber-700/80 dark:text-amber-400/80">Client Registration Fee</span>
                       <span className="font-black text-amber-800 dark:text-amber-300">KES {CLIENT_REGISTRATION_FEE.toLocaleString()}</span>
                     </div>
                     <div className="flex justify-between text-xs border-t border-amber-200 dark:border-amber-800 pt-1.5">
-                      <span className="text-amber-700/80 dark:text-amber-400/80">Loan Application Fee</span>
-                      <span className="font-black text-amber-800 dark:text-amber-300">KES {LOAN_APPLICATION_FEE.toLocaleString()}</span>
+                      <span className="text-amber-700/80 dark:text-amber-400/80">Loan Application Fee (New Client)</span>
+                      <span className="font-black text-amber-800 dark:text-amber-300">KES {currentAppFee.toLocaleString()}</span>
                     </div>
                     <div className="flex justify-between text-xs border-t border-amber-300 dark:border-amber-700 pt-1.5">
                       <span className="font-bold text-amber-800 dark:text-amber-300">Total Fees</span>
-                      <span className="font-black text-amber-900 dark:text-amber-200">KES {(CLIENT_REGISTRATION_FEE + LOAN_APPLICATION_FEE).toLocaleString()}</span>
+                      <span className="font-black text-amber-900 dark:text-amber-200">KES {(CLIENT_REGISTRATION_FEE + currentAppFee).toLocaleString()}</span>
                     </div>
                     <p className="text-[10px] text-amber-600/80 dark:text-amber-500 flex items-center gap-1 mt-1">
                       <Info className="size-3 shrink-0" />
                       Fees are collected manually by the Loan Officer. Not paid through this system.
                     </p>
                   </div>
+
 
                   {/* Applicant Photos */}
                   <div className="space-y-3">
@@ -1370,8 +1386,9 @@ export default function ClientsPage() {
               Fees to collect manually:
             </p>
             <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">
-              Registration: KES {CLIENT_REGISTRATION_FEE.toLocaleString()} + Application: KES {LOAN_APPLICATION_FEE.toLocaleString()} = <strong>KES {(CLIENT_REGISTRATION_FEE + LOAN_APPLICATION_FEE).toLocaleString()}</strong>
+              Registration: KES {CLIENT_REGISTRATION_FEE.toLocaleString()} + Application: KES {currentAppFee.toLocaleString()} = <strong>KES {(CLIENT_REGISTRATION_FEE + currentAppFee).toLocaleString()}</strong>
             </p>
+
           </div>
           <div className="flex gap-4 mt-6 w-full">
             <Button onClick={resetForm} className="flex-1 border border-zinc-200 text-zinc-700 dark:border-zinc-800 dark:text-zinc-300 hover:bg-zinc-50 h-10 rounded-xl">
@@ -1525,7 +1542,14 @@ export default function ClientsPage() {
                         <span className="font-bold text-zinc-900 dark:text-zinc-200">{prop.description}</span>
                         <span className="text-[10px] text-zinc-400 block">Model: {prop.makeModel || "N/A"} • Serial: {prop.serialNo || "N/A"}</span>
                       </div>
-                      <span className="font-bold text-emerald-600">KES {parseFloat(prop.estValue).toLocaleString()}</span>
+                      <span className="font-bold text-emerald-600">
+                        KES {(() => {
+                          const cleanVal = String(prop.estValue || "0").replace(/[^0-9.]/g, "");
+                          const num = parseFloat(cleanVal);
+                          return isNaN(num) ? "0" : num.toLocaleString();
+                        })()}
+                      </span>
+
                     </div>
                   ))}
                 </div>

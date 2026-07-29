@@ -1,7 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -30,6 +30,17 @@ class Settings(BaseSettings):
 
     # Database
     DATABASE_URL: str
+
+    @field_validator("DATABASE_URL", mode="before")
+    @classmethod
+    def validate_database_url(cls, v: str) -> str:
+        if isinstance(v, str):
+            if v.startswith("postgresql://"):
+                return v.replace("postgresql://", "postgresql+psycopg://", 1)
+            elif v.startswith("postgresql+psycopg2://"):
+                return v.replace("postgresql+psycopg2://", "postgresql+psycopg://", 1)
+        return v
+
 
     # Storage
     STORAGE_PATH: Path = Field(default=BASE_DIR / "storage")

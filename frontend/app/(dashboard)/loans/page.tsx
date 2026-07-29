@@ -13,9 +13,10 @@ import { toast } from "sonner";
 import { fetchMeApi } from "@/features/auth/api";
 import {
   fetchLoansApi, fetchLoanApi, createLoanApi, approveLoanApi,
-  rejectLoanApi, disburseLoanApi, closeLoanApi,
-  type Loan, type LoanStatus,
+  rejectLoanApi, disburseLoanApi, closeLoanApi, fetchClientsApi,
+  type Loan, type LoanStatus, type Client,
 } from "@/features/clients/api";
+
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -409,15 +410,35 @@ export default function LoansPage() {
 
   const { data: loans = [], isLoading } = useQuery({ queryKey: ["loans"], queryFn: fetchLoansApi });
 
+  const { data: clients = [] } = useQuery({ queryKey: ["clients"], queryFn: fetchClientsApi });
+
+  const getApplicationFee = (clientName: string, amountStr: string): number => {
+    const amount = parseFloat(amountStr) || 0;
+    const nameClean = clientName.trim().toLowerCase();
+    const isExisting = clients.some((c: Client) => c.name.trim().toLowerCase() === nameClean) ||
+                       loans.some((l: Loan) => l.client.trim().toLowerCase() === nameClean);
+
+    if (amount >= 4000 && amount <= 10000) {
+      return isExisting ? 600 : 800;
+    } else if (amount > 10000) {
+      return isExisting ? 1000 : 1500;
+    }
+    return 500;
+  };
+
+
   const createMut = useMutation({
-    mutationFn: () => createLoanApi({
-      client: form.client, sector: form.sector,
-      amount: parseFloat(form.amount),
-      duration_days: parseInt(form.duration_days) || 90,
-      application_fee: parseFloat(form.application_fee) || 500,
-      notes: form.notes,
-      submitted_by: officerName || "Loan Officer",
-    }),
+    mutationFn: () => {
+      const calculatedFee = getApplicationFee(form.client, form.amount);
+      return createLoanApi({
+        client: form.client, sector: form.sector,
+        amount: parseFloat(form.amount),
+        duration_days: parseInt(form.duration_days) || 90,
+        application_fee: calculatedFee,
+        notes: form.notes,
+        submitted_by: officerName || "Loan Officer",
+      });
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["loans"] });
       toast.success("Loan application submitted!");
@@ -426,6 +447,7 @@ export default function LoansPage() {
     },
     onError: (e: any) => toast.error(e.response?.data?.detail || "Submission failed"),
   });
+
 
   const canCreate = ["Loan Officer", "Manager", "Director", "System Admin"].includes(role);
 
@@ -576,9 +598,10 @@ export default function LoansPage() {
               <button onClick={() => setShowNewForm(false)} className="p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full cursor-pointer"><X className="size-4 text-zinc-500" /></button>
             </div>
             <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-2xl p-3 mb-4 text-xs text-amber-700 dark:text-amber-400">
-              <strong>Fee (Existing Client):</strong> KES 500 Application Fee — collected manually.
+              <strong>Fee:</strong> KES {getApplicationFee(form.client, form.amount).toLocaleString()} Application Fee — collected manually.
               <br /><strong>Interest:</strong> 20% flat on principal added at disbursement.
             </div>
+
             <form onSubmit={(e) => { e.preventDefault(); if (!form.client || !form.amount) { toast.error("Client and amount required"); return; } createMut.mutate(); }}
               className="space-y-4">
               <div className="space-y-1.5">
