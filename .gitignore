@@ -9,8 +9,10 @@ venv/
 env/
 
 # Environment variables
-.env
-.env.*
+# NOTE: backend/.env IS committed by design (team repo, see AGENTS.md).
+# Only local/dev variants are ignored.
+.env.local
+.env.*.local
 !.env.example
 
 # IDE

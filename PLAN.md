@@ -1,6 +1,6 @@
 # Faraja Solution Loans — Master Implementation Plan
 
-> **Last updated:** 2026-08-06
+> **Last updated:** 2026-08-07
 > **Progress legend:** `[ ]` Not started · `[/]` In progress · `[x]` Done
 
 ---
@@ -15,8 +15,27 @@
 | Installment schedule (4wk / 5wk loans) | **Weekly installments** |
 | Location storage | **Google Maps link** (no self-hosted maps) |
 | Company section in client form | Pending |
-| Lumpsum product rates | Pending |
+| Lumpsum product rates | ⚠️ **Still pending** — seeded with 20% placeholder (`app/db/seed.py:301`) |
 | Defaulter definition | Past maturity > 1 month ✅ |
+
+---
+
+## Actual Progress Snapshot (from 2026-08-07 code survey)
+
+> Backend is **fully DB-backed — zero mock-data endpoints remain**. Frontend is mostly wired to real APIs. Remaining work: P1 invite UI completion, settings change-password wiring, client detail fetch, advanced loan statuses, financial report, scheduled email jobs, PDF service, and bug fixes below.
+
+### Known Bugs / Blockers (fix first)
+
+| # | Bug | Impact | Location |
+|---|-----|--------|----------|
+| 1 | Permission name mismatch: checks `clients.edit` but seeded permission is `clients.update` | ✅ **FIXED 2026-08-07** → `clients.update` | `backend/app/api/routers/loans_clients.py:288` |
+| 2 | Permission name mismatch: checks `repayments.create` but seeded permission is `repayments.record` | ✅ **FIXED 2026-08-07** → `repayments.record` | `backend/app/api/routers/loans_clients.py:681` |
+| 3 | Entire admin route block duplicated (lines 51–267 copied at 270–422) | ✅ **FIXED 2026-08-07** — duplicate block deleted (422 → 269 lines) | `backend/app/api/routers/admin.py` |
+| 4 | Duplicate `GET /branches`: unchecked version in `loans_clients.py` registered first, shadows permission-checked one in `branches.py` | ✅ **FIXED 2026-08-07** — removed; guarded version (with stats) now serves; OpenAPI shows 1 definition | `backend/app/api/routers/loans_clients.py` |
+| 5 | `.env` (real Resend API key + `SECRET_KEY`) committed to git | ✅ **DECISION 2026-08-07** — committed by design (single team repo); `.gitignore` updated to allow it; treat as sensitive, rotate if leaked | `backend/.env` |
+| 6 | Notification read-state is an in-memory dict (resets on restart); frontend mark-read is local state, `PATCH /notifications/read-all` not called | Read state lost on restart | `backend/app/api/routers/notifications.py:35` |
+| 7 | Lumpsum interest rate placeholder `0.20` marked TBD | Wrong pricing | `backend/app/db/seed.py:301` |
+| 8 | Backend root `main.py` is a "Hello from backend!" stub; real entry is `app/main.py`; `health.py` router never registered | Confusion, no /health | `backend/main.py`, `backend/app/api/router.py` |
 
 ---
 
@@ -28,7 +47,7 @@
 | Admin — list users, roles, permissions CRUD, update user roles, update role permissions | `backend/app/api/routers/admin.py` | ✅ Real DB, Director-only |
 | Users admin page (directory + permissions matrix) | `frontend/app/(dashboard)/users/page.tsx` | ✅ Built |
 | 6 Roles seeded: Director, Manager, Loan Officer, Finance Officer, System Admin, Auditor | `backend/app/db/seed_data.py` | ✅ In DB |
-| 53 Permissions seeded across all modules | `backend/app/core/permissions.py` | ✅ In DB |
+| 27 Permissions seeded across all modules | `backend/app/core/permissions.py` | ✅ In DB |
 | 11 Branches seeded | `backend/app/core/branches.py` | ✅ In DB |
 | Seed endpoint: `POST /internal/seed` (protected) | `backend/app/api/routers/seed.py` | ✅ Working |
 | Role-permission mapping per role | `backend/app/db/seed.py` → `ROLE_PERMISSIONS` | ✅ Seeded |
@@ -48,24 +67,41 @@
 
 ---
 
-## Architecture Snapshot — Current State
+## Architecture Snapshot — Current State (verified 2026-08-07)
 
-| Area | Backend | Frontend | DB-backed? |
-|------|---------|----------|------------|
-| Auth (login, JWT, /me) | ✅ | ✅ | ✅ Real DB |
-| Admin — users/roles/permissions CRUD | ✅ | ✅ | ✅ Real DB |
-| **User invite/onboarding flow** | ❌ | ❌ | — |
-| Loan products (Faraja 4wk, 5wk, Lumpsum) | ⚠️ Mock | ⚠️ Partial | ❌ |
-| Client registration (full form with photos, signatures) | ⚠️ Mock | ✅ Form built | ❌ |
-| Loan workflow (pending→approved→disbursed) | ⚠️ Mock | ✅ Built | ❌ |
-| Weekly installment schedule | ❌ | ❌ | ❌ |
-| Repayments & penalty calc | ⚠️ Mock | ✅ Built | ❌ |
-| Branches | ⚠️ Mock | ✅ Built | ⚠️ Branch model exists, router still mocked |
-| Reports (portfolio, arrears, collections, financial) | ⚠️ Mock | ✅ Built | ❌ |
-| Notifications (in-app) | ⚠️ Mock | ✅ Built | ❌ |
-| Email notifications (Resend) | ❌ | ❌ | — |
-| PDF form generation + e-signature | ❌ | ❌ | — |
-| M-Pesa | ⏳ Future | — | — |
+| Area | Backend | Frontend | Notes |
+|------|---------|----------|-------|
+| Auth (login, JWT, /me) | ✅ Real DB | ✅ | JWT cookie, 401 → redirect login |
+| Admin — users/roles/permissions CRUD | ✅ Real DB | ✅ | Directory + permissions matrix |
+| **User invite/onboarding flow** | ✅ Real DB + Resend | ✅ Accept-invite page; ⚠️ invite UI + status mgmt missing on users page | `POST /auth/complete-profile` missing (backend) |
+| Loan products (Faraja 4wk, 5wk, Lumpsum) | ✅ Real DB, 3 seeded | ⚠️ Product dropdown hardcoded, not from `/loan-products` | Lumpsum rate placeholder |
+| Client registration (full form with photos, signatures) | ✅ Real DB | ✅ 7-step form with signature pads | Detail drawer uses list data, not `GET /clients/{id}` |
+| Loan workflow (pending→approved→disbursed) | ✅ Real DB | ✅ Approve/reject/disburse/close | Status badges: only 5 basic + overdue flag; no Almost Due/Arrears/etc. |
+| Weekly installment schedule | ✅ Generated on disbursement | ✅ Schedule calendar page | |
+| Repayments & penalty calc | ✅ Real DB | ✅ Record/verify | No partial-payment warning |
+| Branches | ✅ Real DB | ✅ CRUD + stats | ⚠️ Duplicate unchecked `/branches` endpoint |
+| Reports (portfolio, arrears, collections, clients, summary) | ✅ Real DB | ✅ 3 tabs | ❌ Financial report (month/year) missing; no branch filter |
+| Notifications (in-app) | ✅ Real DB queries | ✅ 30s polling | ⚠️ Read-state in-memory (resets on restart) |
+| Email notifications (Resend) | ✅ Invite/approve/reset emails | — | ❌ Due/arrears alert jobs (APScheduler) missing |
+| PDF form generation + e-signature | ❌ Not started (reportlab installed) | ❌ No download button | |
+| M-Pesa | ⏳ Future | — | |
+
+### Seeded data
+- **11 branches** (Head Office–Miritini, Mombasa, Kilifi, Malindi, Watamu, Mariakani, Kwale, Ukunda, Lunga Lunga, Voi, Taveta)
+- **6 roles** (Director, Manager, Loan Officer, Finance Officer, System Admin, Auditor) with approval limits
+- **27 permissions** mapped per role
+- **6 users** (seed password `Faraja@2026` — change after first deploy)
+- **3 loan products**: Faraja 4 Weeks (28d, 20%), Faraja 5 Weeks (35d, 30%), Lumpsum (90d, 20% TBD)
+
+### Migrations (9, in `backend/alembic/versions/`)
+`fa926c06d967` initial · `67573e441d71` branches/permissions/roles · `942b9ff118aa` users + join tables · `4e466c97d30b` password_hash→hashed_password · `97551a08382c` no-op · `ac3d7f2d3767` user_invites · `78fd0153f296` loan_products/clients/loans/installments/repayments · `9c48321056f4` photo/signature cols → Text · `a9213f2dd78e` clients.business_photo
+
+### Services & gaps
+- `auth_service.py` (login, lockout after 5 fails) ✅ · `invite_service.py` ✅ · `email_service.py` (Resend) ✅ · `loan_service.py` (interest, penalty 3%/2d, schedule, computed status, workflow) ✅
+- ❌ `app/tasks/` empty — apscheduler declared but no jobs
+- ❌ `app/reports/` empty — report logic lives in router
+- ❌ `pdf_service.py` missing · `app/storage/s3_service.py` exists but unused (dev no-op)
+- ⚠️ `admin.py` route block duplicated (51–267 vs 270–422)
 
 ---
 
@@ -116,266 +152,122 @@ Director sends invite (Name + Email + Role + Branch)
 ---
 
 ## PRIORITY 1 — User Onboarding & Invite Flow
-> **Status:** `[ ]` Not started
+> **Status:** `[/]` In progress — backend done, frontend partially done
 
-### Backend
+### Backend — ✅ COMPLETE
 
-#### [ ] New DB table: `user_invites`
-- Fields: `id`, `email`, `first_name`, `last_name`, `token` (UUID), `role_name`, `branch_id`, `invited_by_id`, `status` (pending/accepted/expired), `expires_at`, `created_at`
-- Alembic migration: `add_user_invites_table`
-
-#### [ ] `app/services/email_service.py` — Resend integration
-- Configure Resend API key from `settings`
-- `send_invite_email(to_email, invite_link, invited_by_name)`
-- `send_password_reset_email(to_email, reset_link)`
-- `send_account_approved_email(to_email, user_name)`
-
-#### [ ] `app/services/invite_service.py`
-- `create_invite(db, email, first_name, last_name, role_name, branch_id, invited_by_id)` → generate token, store, send email
-- `validate_token(db, token)` → return invite or raise expired/used error
-- `accept_invite(db, token, password)` → create User (status=PENDING_APPROVAL), mark invite accepted
-
-#### [ ] New API endpoints in `admin.py`:
-- `POST /admin/users/invite` — Director sends invite
-- `GET /admin/users/invites` — list all invites with status
-- `DELETE /admin/users/invites/{id}` — cancel/revoke an invite
-- `PATCH /admin/users/{id}/approve` — Director approves PENDING_APPROVAL → ACTIVE
-- `PATCH /admin/users/{id}/status` — activate / deactivate / suspend
-- `POST /admin/users/{id}/reset-password` — Director triggers reset email
-- `PATCH /auth/change-password` — authenticated user changes own password
-
-#### [ ] New public auth endpoints in `auth.py`:
-- `POST /auth/accept-invite` — validate token, set password, create user
-- `POST /auth/complete-profile` — staff completes phone, ID, photo (after accepting invite)
-
-#### [ ] `app/schemas/users.py` — Add:
-- `InviteUserRequest`, `UserInviteResponse`, `AcceptInviteRequest`, `CompleteProfileRequest`, `UpdateUserStatusRequest`, `ChangePasswordRequest`
-
-#### [ ] `app/core/config.py` — Add:
-- `RESEND_API_KEY`, `FRONTEND_URL`
+- [x] `user_invites` table (migration `ac3d7f2d3767`)
+- [x] `app/services/email_service.py` — Resend: invite / account-approved / password-reset emails
+- [x] `app/services/invite_service.py` — create/validate/accept invite, auto employee numbers
+- [x] `POST /admin/users/invite` · `GET /admin/users/invites` · `DELETE /admin/users/invites/{id}`
+- [x] `PATCH /admin/users/{id}/approve` · `PATCH /admin/users/{id}/status` · `POST /admin/users/{id}/reset-password`
+- [x] `PATCH /auth/change-password`
+- [x] `POST /auth/accept-invite` (public, token-based)
+- [x] Schemas (`InviteUserRequest`, `AcceptInviteRequest`, `ChangePasswordRequest`, …) in `app/schemas/users.py`
+- [x] `RESEND_API_KEY`, `FRONTEND_URL` in config
+- [ ] `POST /auth/complete-profile` — ❌ **NOT built** (staff phone/ID/photo completion)
 
 ### Frontend
 
-#### [ ] `app/(auth)/accept-invite/page.tsx`
-- Read `?token=...` from URL
-- Show form: set password + confirm password
-- On submit → `POST /auth/accept-invite` → redirect to `/auth/complete-profile?token=...`
-
-#### [ ] `app/(auth)/complete-profile/page.tsx`
-- Form: phone number, national ID, profile photo upload
-- On submit → `PATCH /auth/complete-profile` → redirect to login with "Account pending approval" message
-
-#### [ ] `app/(dashboard)/users/page.tsx` — Add:
-- **"Invite User"** button → modal (name, email, role dropdown, branch dropdown)
-- **"Pending Invites"** tab — list invites with: email, role, status badge, sent date, cancel button
-- **"Approve Account"** action on users with PENDING_APPROVAL status
-- **Status badge** per user (Active / Locked / Suspended / Pending Approval)
-- **User actions dropdown:** Activate / Deactivate / Suspend / Reset Password
-
-#### [ ] `features/admin/api.ts` — Add:
-- `inviteUserApi()`, `fetchInvitesApi()`, `cancelInviteApi()`, `approveUserApi()`, `updateUserStatusApi()`, `resetPasswordApi()`
-
-#### [ ] `features/auth/api.ts` — Add:
-- `acceptInviteApi()`, `completeProfileApi()`, `changePasswordApi()`
-
-#### [ ] `app/(dashboard)/settings/page.tsx`
-- Wire "Change Password" form to `PATCH /auth/change-password` (currently a no-op)
+- [x] `app/(auth)/accept-invite/page.tsx` — token read, set password, success w/ employee number
+- [ ] `app/(auth)/complete-profile/page.tsx` — ❌ page does not exist
+- [ ] `app/(dashboard)/users/page.tsx` — ❌ **missing:** invite modal, pending invites tab, approve action, status badges, activate/deactivate/suspend/reset actions (only directory + permissions matrix exist)
+- [ ] `features/admin/api.ts` — invite/fetchInvites/cancelInvite/approveUser/updateUserStatus/resetPassword functions missing (only fetch users/roles/permissions + role updates exist)
+- [x] `features/auth/api.ts` — `acceptInviteApi` added ✅ (2026-08-07); `completeProfileApi`/`changePasswordApi` ❌
+- [ ] `app/(dashboard)/settings/page.tsx` — change-password form exists but is a **fake `setTimeout` save**; not wired to `PATCH /auth/change-password`
 
 ---
 
 ## PRIORITY 2 — Loan Products, Client Registration & Loan Workflow (Real DB)
-> **Status:** `[ ]` Not started
+> **Status:** `[/]` In progress — backend ✅ complete, frontend partial + bugs to fix
 
-### Backend — New Models
+### Backend — ✅ COMPLETE (all real DB)
 
-#### [ ] `app/models/enums.py` — Add:
-- `LoanStatus`: Pending, Approved, Disbursed, Rejected, Closed
-- `PaymentMode`: Cash, MPesa, BankTransfer, Cheque, Other
-- `LoanProductType`: Faraja4Weeks, Faraja5Weeks, Lumpsum
+- [x] Enums (`LoanStatus`, `PaymentMode`, `LoanProductType`, `InstallmentStatus`) in `app/models/enums.py`
+- [x] `LoanProduct` model + 3 seeded products (Lumpsum rate = TBD placeholder)
+- [x] `Client` model (full form: photos, signatures, dependants/next-of-kin/properties JSON, maps links)
+- [x] `Loan`, `Installment`, `Repayment` models
+- [x] Migration `78fd0153f296` (all P2 tables) + `9c48321056f4` (Text cols) + `a9213f2dd78e` (business_photo)
+- [x] `loan_service.py` — interest, weekly schedule, penalty (3%/2d), computed status, approve/reject/disburse/close
+- [x] `GET /loan-products` · `GET /clients` · `GET /clients/{id}` · `POST /clients` · `PUT /clients/{id}`
+- [x] `GET /loans` · `GET /loans/{id}` (incl. installments + repayments) · `POST /loans` · approve/reject/disburse/close
+- [x] `GET /installments/calendar?weeks_ahead=N`
+- [x] `branches.py` full CRUD + user assignment (real DB)
 
-#### [ ] `app/models/loan_product.py`
-- `id`, `name`, `product_type` (enum), `duration_days`, `interest_rate` (Decimal), `penalty_rate` (Decimal, default 0.03), `penalty_interval_days` (int, default 2), `max_penalty_amount` (Decimal, nullable), `is_active` (bool)
+### Backend — Bugs to fix
 
-#### [ ] `app/models/client.py`
-- Personal: `name`, `phone`, `email`, `id_no`, `pin`, `gender`, `marital_status`, `occupation`, `address`, `period_years`, `accommodation`, `landmark`
-- Location: `residential_maps_link` (Google Maps URL), `business_maps_link` (Google Maps URL)
-- Spouse: `spouse_name`, `spouse_id`, `spouse_phone`, `spouse_occupation`, `spouse_address`
-- Dependants (JSON): `applicant_dependants`, `spouse_dependants`, `dependants_count`, `dependants_ages`, `school_going_count`, `school_details`
-- Next of kin (JSON): `next_of_kin_list`
-- Business: `business_name`, `business_type`, `business_sector_custom`, `business_landmark`, `business_years`, `business_location`
-- Guarantor: `guarantor_surname`, `guarantor_first_name`, `guarantor_middle_name`, `guarantor_id_no`, `guarantor_phone`, `guarantor_relationship`, `guarantor_address`, `guarantor_occupation`, `guarantor_period_known`
-- Properties (JSON): `properties_list`
-- Photos (S3 URLs): `applicant_id_photo`, `applicant_passport_photo`, `guarantor_id_photo`, `guarantor_passport_photo`
-- Signatures (S3 URLs): `applicant_signature`, `guarantor_signature`
-- Fees: `registration_fee`, `application_fee`
-- FK: `branch_id`, `registered_by_id` (FK User)
-- `date_registered`, `client_number` (auto: `CL-YYYY-NNN`)
+- [ ] **`clients.edit` vs `clients.update`** — PUT /clients always 403s (`loans_clients.py:288`)
+- [ ] **`repayments.create` vs `repayments.record`** — POST /repayments always 403s for Loan Officers (`loans_clients.py:681`)
+- [ ] **Duplicate `GET /branches`** — unchecked copy in `loans_clients.py:801` shadows `branches.py` version
+- [ ] **Duplicate admin route block** — `admin.py:51–267` copied at `270–422`
+- [ ] No permission check on `GET /loan-products`, `GET /dashboard/stats`, `GET /notifications` (decision: add or accept)
+- [ ] Lumpsum interest rate placeholder (see Decisions Log)
 
-#### [ ] `app/models/loan.py`
-- `id`, `loan_number` (auto: `LN-YYYY-NNN`)
-- FK: `client_id`, `branch_id`, `loan_product_id`
-- `amount`, `interest_amount` (computed at disbursement), `total_repayable`, `application_fee`
-- `duration_days`, `installment_amount` (total_repayable / num_weeks)
-- `status` (LoanStatus enum)
-- FK: `submitted_by_id`, `approved_by_id`, `disbursed_by_id`
-- `approval_note`, `rejection_reason`, `notes`
-- `date_submitted`, `date_approved`, `disbursed_date`, `due_date`
+### Frontend
 
-#### [ ] `app/models/installment.py`
-- `id`, FK `loan_id`, `due_date`, `amount`, `status` (Pending/Paid/Missed/Late)
-- Auto-generated on disbursement (weekly schedule)
-
-#### [ ] `app/models/repayment.py`
-- `id`, FK `loan_id`, FK `client_id`
-- `amount`, `date`, `mode` (PaymentMode enum)
-- `reference`, FK `recorded_by_id`
-- `verified` (bool), FK `verified_by_id`, `verified_at`
-
-### Backend — Migrations
-#### [ ] `alembic revision -m "add_loan_products_table"` + seed 3 products
-#### [ ] `alembic revision -m "add_clients_table"`
-#### [ ] `alembic revision -m "add_loans_table"`
-#### [ ] `alembic revision -m "add_installments_table"`
-#### [ ] `alembic revision -m "add_repayments_table"`
-
-### Backend — Repositories
-#### [ ] `app/repositories/client_repo.py` — get, list (branch-scoped), create, update, search
-#### [ ] `app/repositories/loan_repo.py` — get, list (branch-scoped + status filter), create, update status
-#### [ ] `app/repositories/installment_repo.py` — generate schedule, get by loan, mark paid/missed
-#### [ ] `app/repositories/repayment_repo.py` — create, list, sum by loan, mark verified
-
-### Backend — Services
-#### [ ] `app/services/loan_service.py`
-- `calculate_interest(product, amount)` — product-specific flat rate
-- `generate_installment_schedule(loan, disbursed_date)` — weekly dates + amounts
-- `calculate_penalty(outstanding, due_date, rate, interval_days)` — configurable
-- `get_loan_computed_status(loan)` — Almost Due / Due / Arrears / Past Maturity / Defaulter / Missed Payment
-- `approve_loan(db, loan_id, officer)`, `reject_loan(...)`, `disburse_loan(...)`, `close_loan(...)`
-
-#### [ ] `app/services/client_service.py`
-- `register_client(db, data, branch_id, registered_by)` — auto-generate client_number
-- `get_client_with_loans(db, client_id)`
-
-### Backend — Router Replacements
-#### [ ] `app/api/routers/loans_clients.py` — **Replace all `MOCK_*` with real DB**
-- Add `GET /loan-products` (list active products)
-- Add `GET /clients/{id}` (currently missing)
-- All routes: add `Depends(get_current_user)` + role/permission guard
-- Branch scoping:
-  - Loan Officer → sees only own branch
-  - Manager → sees only own branch
-  - Director / Auditor / Finance Officer → sees all branches (with optional `?branch_id=` filter)
-- Role enforcement:
-  - `POST /loans` → requires `loans.create` permission (Loan Officer)
-  - `PATCH /loans/{id}/approve` → requires `loans.approve` (Manager / Director)
-  - `PATCH /loans/{id}/disburse` → requires `loans.disburse` (Director only)
-  - `PATCH /loans/{id}/close` → requires `loans.update` (Manager / Director)
-  - `POST /repayments` → requires `repayments.record` (Loan Officer / Finance Officer)
-  - `PATCH /repayments/{id}/verify` → requires `repayments.reverse` (Manager / Director)
-
-#### [ ] `app/api/routers/branches.py` — Wire to real Branch DB model
-- Replace `MOCK_BRANCHES` with SQLAlchemy queries against Branch model
-- Compute branch stats from real loan/client joins
-
-### Frontend — Updates
-#### [ ] `features/clients/api.ts` — Add:
-- `fetchLoanProductsApi()`, `fetchClientApi(id)`, `fetchInstallmentsApi(loan_id)`
-
-#### [ ] Loan creation form — populate product dropdown from `GET /loan-products`
-#### [ ] Loan list — display extended status badge (Almost Due / Due / Arrears / Past Maturity / Defaulter)
-#### [ ] Client detail page — call `GET /clients/{id}` (currently no backend endpoint)
-#### [ ] Location fields — replace text input with Google Maps link input + preview link
+- [x] Clients list + 7-step registration form (photos base64, signature pads, dependants/next-of-kin/properties/guarantor)
+- [x] Loans list + creation modal + detail drawer (`GET /loans/{id}`) + approve/reject/disburse/close actions
+- [x] Installment schedule calendar page
+- [ ] **Client detail drawer uses list-row data** — add `fetchClientApi(id)` in `features/clients/api.ts` + wire `GET /clients/{id}`
+- [ ] **Loan creation form** — client free-text input + hardcoded sectors; should use `GET /loan-products` (product dropdown) + client search
+- [ ] **Status badges** — only Pending/Approved/Disbursed/Rejected/Closed + overdue flag; add Almost Due / Due / Arrears / Past Maturity / Defaulter
+- [ ] Location fields — Google Maps link input + preview (currently plain text)
 
 ---
 
 ## PRIORITY 3 — Repayments & Payment Confirmation (Real DB)
-> **Status:** `[ ]` Not started — depends on P2
+> **Status:** `[/]` In progress — core ✅, refinements missing
 
 ### Backend
-#### [ ] Partial payment detection in `loan_service.py`
-- If repayment < installment due → flag installment as `Late`, loan status → `Arrears`
-- Penalty accrues on outstanding balance every 2 days
-
-#### [ ] Installment matching logic
-- On new repayment, match against earliest unpaid installment
-- Mark installment Paid / Partial / Missed accordingly
-
-#### [ ] `PATCH /repayments/{id}/verify` — wire to real DB
-- Permission check: `repayments.reverse` (Manager / Director)
-
-#### [ ] `PATCH /admin/loan-products/{id}` — allow Admin to edit penalty_rate, penalty_interval_days
+- [x] POST `/repayments` (verified=False) + PATCH `/repayments/{id}/verify` — real DB
+- [x] Installment matching on repayment (via `loan_service`)
+- [x] Penalty calc on outstanding (3%/2d)
+- [ ] `PATCH /admin/loan-products/{id}` — Admin edit of penalty_rate / penalty_interval_days — ❌ not built
+- [ ] Partial payment → installment `Late` + loan `Arrears` status logic — verify implemented end-to-end
+- [ ] **Bug: `repayments.create` permission check uses non-existent permission** (see Known Bugs)
 
 ### Frontend
-#### [ ] Repayments page — verify with real DB data post-P2
-#### [ ] Show "Partial Payment" warning when repayment < installment due
-#### [ ] Show installment schedule timeline per loan (which weeks paid / missed / upcoming)
+- [x] Repayments list (All / Pending tabs), record form, verify modal (role-gated)
+- [ ] Partial payment warning when repayment < installment due — ❌ missing
+- [ ] Installment schedule timeline per loan (which weeks paid/missed/upcoming) in loan detail — ❌ missing (calendar page exists but not per-loan timeline)
 
 ---
 
 ## PRIORITY 4 — Reports & Financial Summaries (Real DB)
-> **Status:** `[ ]` Not started — depends on P2
+> **Status:** `[/]` In progress — 5 of 6 reports done
 
 ### Backend
-#### [ ] `app/reports/loan_report.py`
-- Portfolio: total disbursed, outstanding, collected, interest earned, penalties accrued
-- By status count; by sector breakdown; overdue/arrears list with penalty exposure
-
-#### [ ] `app/reports/collection_report.py`
-- By date range, by payment mode; missed payments log
-
-#### [ ] `app/reports/client_report.py`
-- Total by branch, by sector; new registrations per month
-
-#### [ ] `app/reports/financial_report.py` ← NEW
-- Monthly per branch: active clients, loans disbursed (count + amount), repayments received, profit (interest collected), losses (write-offs / past maturity)
-- Org-wide summary (all branches combined)
-
-#### [ ] Report route replacements:
-- `GET /reports/portfolio?branch_id=&date_from=&date_to=`
-- `GET /reports/arrears?branch_id=`
-- `GET /reports/collections?branch_id=&date_from=&date_to=`
-- `GET /reports/clients?branch_id=`
-- `GET /reports/financial?branch_id=&month=&year=` ← NEW
+- [x] `GET /reports/portfolio` — disbursed/outstanding/collected/interest/penalties, by status, by sector (real DB aggregations in `reports.py`)
+- [x] `GET /reports/arrears` — overdue list + penalty exposure
+- [x] `GET /reports/collections?date_from=&date_to=` — by mode, per loan
+- [x] `GET /reports/clients` — by branch, by sector
+- [x] `GET /reports/summary`
+- [ ] **Financial report (month/year per branch: active clients, disbursed, repayments, profit/loss, write-offs)** — ❌ not built
+- [ ] Report logic sits in router (`app/reports/` empty) — optional refactor
 
 ### Frontend
-#### [ ] `app/(dashboard)/reports/page.tsx` — Add:
-- Branch filter dropdown (Director = all; Manager = own branch only)
-- Month/year picker for financial report
-- Financial summary card: profit, losses, disbursed amount, total collected
+- [x] Reports page — Portfolio / Arrears / Collections tabs, KPIs, charts, tables
+- [ ] Branch filter dropdown (Director = all; Manager = own branch) — ❌ missing (BranchSelector exists but no page reads it)
+- [ ] Month/year picker for financial report — ❌ missing (date-range inputs only)
+- [ ] Financial summary card: profit, losses, disbursed, collected — ❌ missing
+- [ ] Export buttons — ❌ missing
 
 ---
 
 ## PRIORITY 5 — Notifications (In-App + Email via Resend)
-> **Status:** `[ ]` Not started — depends on P2
+> **Status:** `[/]` In progress — in-app ✅, email jobs ❌
 
-### In-App (real DB)
-#### [ ] `GET /notifications` — replace mock with real DB queries:
-- **Today's dues** — loans/installments due today
-- **Tomorrow's dues** — due tomorrow
-- **Day after tomorrow** — "Kesho kutwa"
-- **Arrears** — outstanding balance + penalty accruing
-- **Missed payments** — installment not received
-- **Pending approvals** — awaiting Manager
-- **Awaiting disbursement** — awaiting Director
-- **Unverified repayments** — awaiting Manager/Director
-- **Overdue / Past Maturity / Defaulters**
-
-#### [ ] Frontend polling
-- `components/layout/notifications.tsx` — `refetchInterval: 5 * 60 * 1000` (every 5 min)
+### In-App
+- [x] `GET /notifications` — real DB queries (today/tomorrow dues, arrears, unverified repayments, pending approvals, overdue)
+- [x] Frontend polling every 30s + mark-read UI
+- [ ] Notification read-state persisted — currently in-memory dict (resets on restart); needs DB table or accept as-is
+- [ ] Frontend mark-read / mark-all-read wired to backend endpoint (`PATCH /notifications/read-all` exists backend-side; frontend uses local state only)
 
 ### Email Notifications (Resend)
-#### [ ] `app/services/email_service.py` — Templates:
-- Invite email (already in P1)
-- Loan approved — to submitting LO
-- Loan disbursed — to submitting LO
-- **Due reminder T-2** — to Manager (almost due)
-- **Due today** — to Manager
-- **Arrears alert** — to Manager + Director
-- **Past maturity / defaulter** — to Director
-
-#### [ ] `app/tasks/` — Background daily job (APScheduler):
-- Scan all active loans → trigger due/arrears email alerts
-- Penalty recalculation snapshot every 2 days
+- [x] `email_service.py` — invite / account-approved / password-reset templates
+- [ ] Loan approved → submitting LO · Loan disbursed → submitting LO
+- [ ] Due reminder T-2 → Manager · Due today → Manager · Arrears alert → Manager + Director · Past maturity/defaulter → Director
+- [ ] `app/tasks/` APScheduler daily job — scan active loans, trigger due/arrears alerts, penalty snapshot — ❌ empty (apscheduler in requirements but unused)
 
 ---
 
@@ -383,26 +275,14 @@ Director sends invite (Name + Email + Role + Branch)
 > **Status:** `[ ]` Not started — depends on P2
 
 ### Backend
-#### [ ] `app/services/pdf_service.py`
-- Generate PDF from client registration data (WeasyPrint or ReportLab)
-- Sections: personal details, next of kin, guarantor, dependants, properties
-- Append applicant + guarantor signature images at end
-- Embed passport photos and ID photos
-
-#### [ ] `GET /clients/{id}/pdf` — return PDF as file download / S3 signed URL
-
-#### [ ] Signature flow:
-- Frontend captures signature as base64 PNG
-- Upload to S3 via `app/storage/s3_service.py` (already exists)
-- Store S3 URL in client record
+- [ ] `app/services/pdf_service.py` — ReportLab installed but never used
+- [ ] `GET /clients/{id}/pdf` — PDF download
+- [ ] Signature flow — frontend already captures base64 signatures in client registration; S3 upload via `s3_service.py` exists but unused (dev no-op); decide: store base64 in DB (current) vs S3
 
 ### Frontend
-#### [ ] Client registration form — Add:
-- Signature pad component (`react-signature-canvas`) for applicant and guarantor
-- Upload fields: applicant ID photo, passport photo, guarantor ID photo, passport photo
-
-#### [ ] Client detail page — Add:
-- **"Download Form PDF"** button → `GET /clients/{id}/pdf`
+- [x] Signature pads (react-signature-canvas) — applicant + guarantor, in client registration
+- [x] Photo uploads (4: applicant/guarantor × ID/passport) — base64 to DB
+- [ ] **"Download Form PDF"** button on client detail — ❌ missing
 
 ---
 
@@ -410,15 +290,20 @@ Director sends invite (Name + Email + Role + Branch)
 
 | Item | Phase | Status |
 |------|-------|--------|
-| Role/permission guards on ALL API routes | P2 | `[ ]` |
-| Branch scoping (LO/Manager see only own branch) | P2 | `[ ]` |
-| `GET /clients/{id}` endpoint (currently missing) | P2 | `[ ]` |
-| Auto-increment employee numbers per role prefix | P1 | `[ ]` |
-| JWT token refresh / session expiry handling | P1 | `[ ]` |
-| S3 photo uploads wired to client form | P2/P6 | `[ ]` |
-| Settings — change password wired to real API | P1 | `[ ]` |
-| Seed script updated for new models (loan_products, demo clients/loans) | P2 | `[ ]` |
-| `repayments.reverse` permission — clarify if this is the "verify" permission | P2 | ⚠️ Check |
+| Role/permission guards on ALL API routes | P2 | `[x]` Most routes guarded — ⚠️ gaps: `GET /loan-products`, `GET /dashboard/stats`, `GET /notifications`, dup `GET /branches` |
+| Permission name mismatches (`clients.edit`, `repayments.create`) | P2 | `[ ]` 🔴 BREAKS workflows — fix first |
+| Branch scoping (LO/Manager see only own branch) | P2 | `[ ]` ⚠️ Verify implementation in queries |
+| `GET /clients/{id}` endpoint | P2 | `[x]` Backend ✅ — frontend drawer still uses list data |
+| Auto-increment employee numbers per role prefix | P1 | `[x]` `invite_service._next_employee_number()` |
+| JWT token refresh / session expiry handling | P1 | `[x]` Cookie 7d, 401 → redirect `/login?expired=true` |
+| S3 photo uploads wired to client form | P2/P6 | `[x]` Stored as base64 in DB (dev). S3 service exists, unused — decide storage strategy |
+| Settings — change password wired to real API | P1 | `[ ]` Still a fake `setTimeout` save |
+| Seed script updated for new models (loan_products, demo clients/loans) | P2 | `[x]` 3 products seeded; demo clients/loans — ⚠️ verify |
+| `repayments.verify` permission | P2 | `[x]` Confirmed — verify uses `repayments.verify` |
+| Duplicated admin route block (`admin.py:51–267` vs `270–422`) | P1 | `[ ]` Cleanup |
+| `.env` committed with real keys | Security | `[x]` Decision 2026-08-07: committed by design; `.gitignore` unignored; rotate if leaked |
+| Backend root `main.py` stub + unregistered `/health` router | — | `[ ]` Cleanup |
+| Tests | — | `[ ]` No test dirs anywhere (backend or frontend) |
 
 ---
 
