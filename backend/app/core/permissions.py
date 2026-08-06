@@ -20,7 +20,7 @@ PERMISSIONS = [
     # Repayments
     "repayments.view",
     "repayments.record",
-    "repayments.reverse",
+    "repayments.verify",
 
     # Expenses
     "expenses.view",

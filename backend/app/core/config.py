@@ -51,6 +51,17 @@ class Settings(BaseSettings):
     # Logging
     LOG_LEVEL: str = "INFO"
 
+    # Email (Resend)
+    RESEND_API_KEY: str = ""
+    RESEND_FROM_EMAIL: str = "Faraja Solution Loans <noreply@farajasolutions.co.ke>"
+
+    # Frontend
+    FRONTEND_URL: str = "http://localhost:3000"
+
+    # Invite tokens
+    INVITE_TOKEN_EXPIRE_HOURS: int = 72
+
+
 
 @lru_cache
 def get_settings() -> Settings:

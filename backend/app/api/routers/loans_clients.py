@@ -1,118 +1,108 @@
 """
-Full Loan & Client Router — Faraja Solution Loans
+Loan & Client Router — Faraja Solution Loans (PostgreSQL backend)
 
 Loan Workflow:
   Loan Officer  → POST /loans               (status: Pending)
-  Manager       → PATCH /loans/{id}/approve  (status: Pending → Approved)
-  Manager/Dir   → PATCH /loans/{id}/reject   (any → Rejected)
-  Director      → PATCH /loans/{id}/disburse (Approved → Disbursed, sets due_date)
+  Manager/Dir   → PATCH /loans/{id}/approve  (Pending → Approved)
+  Manager/Dir   → PATCH /loans/{id}/reject   (Pending/Approved → Rejected)
+  Director      → PATCH /loans/{id}/disburse (Approved → Disbursed + schedule generated)
   Director      → PATCH /loans/{id}/close    (Disbursed, fully repaid → Closed)
-
-Interest: 20% flat on principal (added at disbursement)
-Penalty:  3% of outstanding per every 2 days overdue
 
 Repayment Workflow:
   Loan Officer  → POST /repayments           (verified: false)
   Manager/Dir   → PATCH /repayments/{id}/verify
 """
 
-from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel
-from datetime import datetime, date, timedelta
-from typing import Optional, List
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from decimal import Decimal
+from typing import Any, Optional, List
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, ConfigDict
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session, joinedload
+
+from app.api.dependencies.auth import get_current_user
+from app.db.session import get_db
+from app.models.branch import Branch
+from app.models.client import Client
+from app.models.enums import LoanStatus, PaymentMode
+from app.models.installment import Installment
+from app.models.loan import Loan
+from app.models.loan_product import LoanProduct
+from app.models.repayment import Repayment
+from app.models.user import User
+from app.services import loan_service
 
 router = APIRouter()
 
-INTEREST_RATE = 0.20          # 20% flat on principal
-PENALTY_RATE  = 0.03          # 3% per 2-day period overdue
+
+# ── Helpers ────────────────────────────────────────────────────────────────────
+
+def _require_permission(user: User, perm: str) -> None:
+    user_perms = {rp.permission.name for ur in user.roles for rp in ur.role.permissions}
+    if perm not in user_perms:
+        raise HTTPException(status_code=403, detail=f"Permission '{perm}' required.")
 
 
-# ── Utility ────────────────────────────────────────────────────────────────────
+def _enrich_loan(loan: Loan, db: Session) -> dict:
+    outstanding = loan_service.get_outstanding(db, loan)
+    computed_status = loan_service.get_computed_loan_status(loan, outstanding)
 
-def _calc_penalty(outstanding: float, disbursed_date_str: str, due_date_str: str) -> dict:
-    """Return penalty amount and days overdue for a loan."""
-    if not disbursed_date_str or not due_date_str:
-        return {"days_overdue": 0, "penalty": 0.0}
-    today = date.today()
-    due = date.fromisoformat(due_date_str)
-    if today <= due:
-        return {"days_overdue": 0, "penalty": 0.0}
-    days_overdue = (today - due).days
-    two_day_periods = days_overdue // 2
-    penalty = round(outstanding * PENALTY_RATE * two_day_periods, 2)
-    return {"days_overdue": days_overdue, "penalty": penalty}
+    penalty_info = {"days_overdue": 0, "penalty": Decimal("0")}
+    if loan.loan_product and loan.status == LoanStatus.DISBURSED and loan.due_date:
+        penalty_info = loan_service.calculate_penalty(
+            outstanding,
+            loan.due_date,
+            loan.loan_product.penalty_rate,
+            loan.loan_product.penalty_interval_days,
+        )
 
-
-def _enrich_loan(loan: dict) -> dict:
-    """Attach computed fields to a loan dict."""
-    loan = dict(loan)
-    amount = loan.get("amount", 0)
-    interest = round(amount * INTEREST_RATE, 2)
-    total_repayable = round(amount + interest, 2)
-
-    # Sum verified repayments for this loan
-    verified_paid = sum(
-        r["amount"] for r in MOCK_REPAYMENTS
-        if r["loan_id"] == loan["id"] and r.get("verified", False)
-    )
-    outstanding = max(round(total_repayable - verified_paid, 2), 0)
-
-    # Penalty
-    pen = _calc_penalty(outstanding, loan.get("disbursed_date"), loan.get("due_date"))
-
-    loan["interest_amount"] = interest if loan.get("status") in ("Disbursed", "Closed") else 0.0
-    loan["total_repayable"] = total_repayable if loan.get("status") in ("Disbursed", "Closed") else amount
-    loan["amount_repaid"] = verified_paid
-    loan["outstanding"] = outstanding
-    loan["is_overdue"] = pen["days_overdue"] > 0
-    loan["days_overdue"] = pen["days_overdue"]
-    loan["penalty_amount"] = pen["penalty"]
-    return loan
-
-
-# ── Schemas ────────────────────────────────────────────────────────────────────
-
-class LoanCreateRequest(BaseModel):
-    client: str
-    sector: str
-    amount: float
-    duration_days: int = 90               # Set by LO at application time
-    application_fee: Optional[float] = None
-    notes: Optional[str] = None
-    submitted_by: Optional[str] = None
+    return {
+        "id": str(loan.id),
+        "loan_number": loan.loan_number,
+        "client": loan.client.name if loan.client else "",
+        "client_id": str(loan.client_id),
+        "sector": loan.sector,
+        "amount": float(loan.amount),
+        "interest_amount": float(loan.interest_amount),
+        "total_repayable": float(loan.total_repayable),
+        "application_fee": float(loan.application_fee),
+        "installment_amount": float(loan.installment_amount),
+        "duration_days": loan.duration_days,
+        "status": computed_status,
+        "db_status": loan.status.value,
+        "notes": loan.notes,
+        "approval_note": loan.approval_note,
+        "rejection_reason": loan.rejection_reason,
+        "product": loan.loan_product.name if loan.loan_product else None,
+        "product_id": str(loan.loan_product_id) if loan.loan_product_id else None,
+        "branch": loan.branch.name if loan.branch else None,
+        "submitted_by": _user_str(loan.submitted_by),
+        "approved_by": _user_str(loan.approved_by),
+        "disbursed_by": _user_str(loan.disbursed_by),
+        "date": loan.date_submitted.isoformat() if loan.date_submitted else None,
+        "disbursed_date": loan.disbursed_date.isoformat() if loan.disbursed_date else None,
+        "due_date": loan.due_date.date().isoformat() if loan.due_date else None,
+        "outstanding": float(outstanding),
+        "amount_repaid": float(loan.total_repayable - outstanding) if loan.status == LoanStatus.DISBURSED else 0.0,
+        "is_overdue": penalty_info["days_overdue"] > 0,
+        "days_overdue": penalty_info["days_overdue"],
+        "penalty_amount": float(penalty_info["penalty"]),
+    }
 
 
-def calc_application_fee(client_name: str, amount: float) -> float:
-    name_clean = client_name.strip().lower()
-    is_existing = any(c.get("name", "").strip().lower() == name_clean for c in MOCK_CLIENTS) or \
-                  any(l.get("client", "").strip().lower() == name_clean for l in MOCK_LOANS)
-    
-    if 4000 <= amount <= 10000:
-        return 600.0 if is_existing else 800.0
-    elif amount > 10000:
-        return 1000.0 if is_existing else 1500.0
-    return 500.0
+def _user_str(user: User | None) -> str | None:
+    if not user:
+        return None
+    role = user.roles[0].role.name if user.roles else ""
+    return f"{user.first_name} {user.last_name} ({role[:3].upper()})" if role else user.full_name
 
 
-
-class LoanActionRequest(BaseModel):
-    note: Optional[str] = None
-    officer_name: Optional[str] = None
-    duration_days: Optional[int] = None   # Director may adjust at disbursement
-
-
-class RepaymentCreateRequest(BaseModel):
-    loan_id: str
-    client: str
-    amount: float
-    mode: str = "Cash"
-    reference: Optional[str] = None
-    recorded_by: Optional[str] = None
-
-
-class RepaymentVerifyRequest(BaseModel):
-    verified_by: str
-
+# ── Request / Response Schemas ─────────────────────────────────────────────────
 
 class NextOfKinSchema(BaseModel):
     fullName: str
@@ -121,7 +111,6 @@ class NextOfKinSchema(BaseModel):
     phone: str
     address: Optional[str] = None
     occupation: Optional[str] = None
-    school_note: Optional[str] = None
 
 
 class DependantSchema(BaseModel):
@@ -154,6 +143,8 @@ class ClientCreateRequest(BaseModel):
     period_years: Optional[str] = None
     accommodation: Optional[str] = "Family"
     landmark: Optional[str] = None
+    residential_maps_link: Optional[str] = None
+    business_maps_link: Optional[str] = None
     spouse_name: Optional[str] = None
     spouse_id: Optional[str] = None
     spouse_phone: Optional[str] = None
@@ -184,524 +175,592 @@ class ClientCreateRequest(BaseModel):
     properties_list: List[PropertyItemSchema] = []
     applicant_id_photo: Optional[str] = None
     applicant_passport_photo: Optional[str] = None
+    business_photo: Optional[str] = None
     guarantor_id_photo: Optional[str] = None
     guarantor_passport_photo: Optional[str] = None
     applicant_signature: Optional[str] = None
     guarantor_signature: Optional[str] = None
     registration_fee: Optional[float] = None
     application_fee: Optional[float] = None
+    branch_id: Optional[UUID] = None
 
 
-# ── In-Memory Storage ──────────────────────────────────────────────────────────
-
-MOCK_LOANS: list[dict] = [
-    {
-        "id": "LN-2026-901",
-        "client": "Zawadi Enterprises Ltd",
-        "sector": "Retail & Trade",
-        "amount": 450000.0,
-        "duration_days": 90,
-        "application_fee": 500.0,
-        "notes": "Business expansion — Miritini branch",
-        "submitted_by": "Brian Kamau (LO)",
-        "approved_by": "Grace Njeri (MGR)",
-        "disbursed_by": None,
-        "approval_note": "Client has good repayment history",
-        "rejection_reason": None,
-        "date": "2026-07-18",
-        "disbursed_date": None,
-        "due_date": None,
-        "status": "Approved",
-    },
-    {
-        "id": "LN-2026-894",
-        "client": "Baraka Agro-Supplies",
-        "sector": "Agriculture",
-        "amount": 1200000.0,
-        "duration_days": 180,
-        "application_fee": 500.0,
-        "notes": "Seasonal stock purchase — long rains",
-        "submitted_by": "Brian Kamau (LO)",
-        "approved_by": "Grace Njeri (MGR)",
-        "disbursed_by": "John Mwangi (DIR)",
-        "approval_note": "Approved within agri-fund limit",
-        "rejection_reason": None,
-        "date": "2026-07-10",
-        "disbursed_date": "2026-07-16",
-        "due_date": "2027-01-12",
-        "status": "Disbursed",
-    },
-    {
-        "id": "LN-2026-882",
-        "client": "Pwani Logistics Co.",
-        "sector": "Logistics & Transport",
-        "amount": 800000.0,
-        "duration_days": 120,
-        "application_fee": 500.0,
-        "notes": "Fleet maintenance and new tyre purchase",
-        "submitted_by": "Brian Kamau (LO)",
-        "approved_by": "Grace Njeri (MGR)",
-        "disbursed_by": "John Mwangi (DIR)",
-        "approval_note": None,
-        "rejection_reason": None,
-        "date": "2026-06-20",
-        "disbursed_date": "2026-06-25",
-        "due_date": "2026-10-23",
-        "status": "Disbursed",
-    },
-    {
-        "id": "LN-2026-870",
-        "client": "Mama Faida Boutique",
-        "sector": "Retail & Trade",
-        "amount": 150000.0,
-        "duration_days": 60,
-        "application_fee": 500.0,
-        "notes": "Clothing stock — festive season",
-        "submitted_by": "Brian Kamau (LO)",
-        "approved_by": None,
-        "disbursed_by": None,
-        "approval_note": None,
-        "rejection_reason": None,
-        "date": "2026-07-24",
-        "disbursed_date": None,
-        "due_date": None,
-        "status": "Pending",
-    },
-    {
-        "id": "LN-2026-855",
-        "client": "Kilifi Fisheries Ltd",
-        "sector": "Agriculture",
-        "amount": 600000.0,
-        "duration_days": 90,
-        "application_fee": 500.0,
-        "notes": "",
-        "submitted_by": "Brian Kamau (LO)",
-        "approved_by": "Grace Njeri (MGR)",
-        "disbursed_by": "John Mwangi (DIR)",
-        "approval_note": None,
-        "rejection_reason": None,
-        "date": "2026-04-01",
-        "disbursed_date": "2026-04-05",
-        # OVERDUE: due 3 months ago
-        "due_date": "2026-07-04",
-        "status": "Disbursed",
-    },
-]
-
-MOCK_REPAYMENTS: list[dict] = [
-    {
-        "id": "RP-001",
-        "loan_id": "LN-2026-894",
-        "client": "Baraka Agro-Supplies",
-        "amount": 200000.0,
-        "date": "2026-07-20",
-        "mode": "Bank Transfer",
-        "reference": "EFT-9923",
-        "recorded_by": "Brian Kamau (LO)",
-        "verified": True,
-        "verified_by": "Grace Njeri (MGR)",
-        "verified_at": "2026-07-21",
-    },
-    {
-        "id": "RP-002",
-        "loan_id": "LN-2026-882",
-        "client": "Pwani Logistics Co.",
-        "amount": 120000.0,
-        "date": "2026-07-18",
-        "mode": "Cash",
-        "reference": "CSH-002",
-        "recorded_by": "Brian Kamau (LO)",
-        "verified": True,
-        "verified_by": "John Mwangi (DIR)",
-        "verified_at": "2026-07-18",
-    },
-    {
-        "id": "RP-003",
-        "loan_id": "LN-2026-882",
-        "client": "Pwani Logistics Co.",
-        "amount": 80000.0,
-        "date": "2026-07-22",
-        "mode": "Cash",
-        "reference": "CSH-005",
-        "recorded_by": "Brian Kamau (LO)",
-        "verified": False,
-        "verified_by": None,
-        "verified_at": None,
-    },
-    {
-        "id": "RP-004",
-        "loan_id": "LN-2026-855",
-        "client": "Kilifi Fisheries Ltd",
-        "amount": 100000.0,
-        "date": "2026-07-15",
-        "mode": "M-Pesa",
-        "reference": "QER7X9KL2",
-        "recorded_by": "Brian Kamau (LO)",
-        "verified": False,
-        "verified_by": None,
-        "verified_at": None,
-    },
-]
-
-MOCK_CLIENTS: list[dict] = [
-    {
-        "id": "CL-001",
-        "name": "Zawadi Enterprises Ltd",
-        "phone": "+254 711 000 111",
-        "email": "zawadi@gmail.com",
-        "id_no": "29100200",
-        "pin": "A001928374Z",
-        "gender": "Female",
-        "marital_status": "Married",
-        "occupation": "Businesswoman",
-        "address": "Miritini Estate, Mombasa",
-        "period_years": "8",
-        "accommodation": "Own",
-        "landmark": "Near Miritini Primary School",
-        "spouse_name": "Samuel Mwangi",
-        "spouse_id": "28192839",
-        "spouse_phone": "+254 711 999 888",
-        "spouse_occupation": "Transporter",
-        "spouse_address": "Miritini Estate, Mombasa",
-        "applicant_dependants": [
-            {"fullName": "Grace Mwangi", "age": "12", "relationship": "Daughter",
-             "is_school_going": True, "school_name": "Mombasa Academy", "school_grade": "Grade 7", "occupation": "Student"}
-        ],
-        "spouse_dependants": [],
-        "dependants_count": "3", "dependants_ages": "12, 10, 6",
-        "school_going_count": "2", "school_details": "Mombasa Academy",
-        "next_of_kin_list": [
-            {"fullName": "Grace Mwangi", "idNo": "34928394", "relationship": "Daughter",
-             "phone": "+254 712 345 678", "address": "Miritini, House 14", "occupation": "Student", "school_note": None}
-        ],
-        "business_name": "Zawadi Groceries & Wholesalers",
-        "business_type": "Retail & Trade",
-        "business_sector_custom": None,
-        "business_landmark": "Opposite Caltex Petrol Station",
-        "business_years": "5", "business_location": "Shimanzi Road, Mombasa",
-        "guarantor_surname": "Njuguna", "guarantor_first_name": "Kamau",
-        "guarantor_middle_name": "John", "guarantor_id_no": "29384756",
-        "guarantor_phone": "+254 722 555 444", "guarantor_relationship": "Trade Partner",
-        "guarantor_address": "Majengo, Mombasa", "guarantor_occupation": "Hardware Owner",
-        "guarantor_period_known": "6 years",
-        "properties_list": [
-            {"description": "Double Door Refrigerator", "makeModel": "LG Linear", "serialNo": "LG-99283-F", "estValue": "120000"},
-            {"description": "Toyota Probox Courier Car", "makeModel": "Toyota Probox 2014", "serialNo": "KCD 123X", "estValue": "850000"}
-        ],
-        "applicant_id_photo": None, "applicant_passport_photo": None,
-        "guarantor_id_photo": None, "guarantor_passport_photo": None,
-        "applicant_signature": None, "guarantor_signature": None,
-        "registration_fee": 1000.0, "application_fee": 500.0,
-        "date_registered": "2026-06-12",
-    },
-    {
-        "id": "CL-002",
-        "name": "Baraka Agro-Supplies",
-        "phone": "+254 722 000 222",
-        "email": "baraka@gmail.com",
-        "id_no": "20993849",
-        "pin": "A002049384B",
-        "gender": "Male",
-        "marital_status": "Married",
-        "occupation": "Agro-dealer",
-        "address": "Mazeras Town",
-        "period_years": "12",
-        "accommodation": "Own",
-        "landmark": "Mazeras Junction",
-        "spouse_name": "Lucy Kemunto",
-        "spouse_id": "24930293",
-        "spouse_phone": "+254 722 888 111",
-        "spouse_occupation": "Teacher",
-        "spouse_address": "Mazeras Town, Kilifi County",
-        "applicant_dependants": [],
-        "spouse_dependants": [],
-        "dependants_count": "2", "dependants_ages": "16, 14",
-        "school_going_count": "2", "school_details": "Shimo La Tewa High",
-        "next_of_kin_list": [
-            {"fullName": "Peter Njoroge", "idNo": "32094859", "relationship": "Son",
-             "phone": "+254 734 909 090", "address": "Mazeras", "occupation": "Student",
-             "school_note": "Currently in school - Form 3, Shimo La Tewa"}
-        ],
-        "business_name": "Baraka Seeds & Fertilizers",
-        "business_type": "Agriculture",
-        "business_sector_custom": None,
-        "business_landmark": "Next to KCB Agent",
-        "business_years": "7", "business_location": "Mazeras Main Road",
-        "guarantor_surname": "Kuria", "guarantor_first_name": "David",
-        "guarantor_middle_name": "Mutua", "guarantor_id_no": "20394857",
-        "guarantor_phone": "+254 733 444 555", "guarantor_relationship": "Neighbor",
-        "guarantor_address": "Mazeras", "guarantor_occupation": "Farmer",
-        "guarantor_period_known": "10 years",
-        "properties_list": [
-            {"description": "Store Warehouse Stock", "makeModel": "DAP/CAN Seeds", "serialNo": "N/A", "estValue": "500000"}
-        ],
-        "applicant_id_photo": None, "applicant_passport_photo": None,
-        "guarantor_id_photo": None, "guarantor_passport_photo": None,
-        "applicant_signature": None, "guarantor_signature": None,
-        "registration_fee": 1000.0, "application_fee": 500.0,
-        "date_registered": "2026-06-14",
-    },
-]
+class LoanCreateRequest(BaseModel):
+    client_id: UUID
+    loan_product_id: UUID
+    amount: float
+    sector: Optional[str] = None
+    notes: Optional[str] = None
+    branch_id: Optional[UUID] = None
 
 
-# ── LOAN ROUTES ────────────────────────────────────────────────────────────────
-
-@router.get("/loans")
-def get_loans():
-    return [_enrich_loan(l) for l in MOCK_LOANS]
+class LoanActionRequest(BaseModel):
+    note: Optional[str] = None
 
 
-@router.get("/loans/{loan_id}")
-def get_loan(loan_id: str):
-    loan = next((l for l in MOCK_LOANS if l["id"] == loan_id), None)
-    if not loan:
-        raise HTTPException(status_code=404, detail="Loan not found")
-    enriched = _enrich_loan(loan)
-    enriched["repayments"] = [r for r in MOCK_REPAYMENTS if r["loan_id"] == loan_id]
-    return enriched
+class RepaymentCreateRequest(BaseModel):
+    loan_id: UUID
+    amount: float
+    mode: str = "Cash"
+    reference: Optional[str] = None
+    notes: Optional[str] = None
+    date: Optional[str] = None  # ISO date string; defaults to today
 
 
-@router.post("/loans", status_code=status.HTTP_201_CREATED)
-def create_loan(request: LoanCreateRequest):
-    new_id = f"LN-2026-{1000 + len(MOCK_LOANS)}"
-    new_loan = {
-        "id": new_id,
-        "client": request.client,
-        "sector": request.sector,
-        "amount": request.amount,
-        "duration_days": request.duration_days,
-        "application_fee": request.application_fee if request.application_fee is not None else calc_application_fee(request.client, request.amount),
-        "notes": request.notes or "",
-        "submitted_by": request.submitted_by or "Loan Officer",
-        "approved_by": None,
-        "disbursed_by": None,
-        "approval_note": None,
-        "rejection_reason": None,
-        "date": datetime.now().strftime("%Y-%m-%d"),
-        "disbursed_date": None,
-        "due_date": None,
-        "status": "Pending",
-    }
-    MOCK_LOANS.insert(0, new_loan)
-    return _enrich_loan(new_loan)
-
-
-@router.patch("/loans/{loan_id}/approve")
-def approve_loan(loan_id: str, body: LoanActionRequest):
-    loan = next((l for l in MOCK_LOANS if l["id"] == loan_id), None)
-    if not loan:
-        raise HTTPException(status_code=404, detail="Loan not found")
-    if loan["status"] != "Pending":
-        raise HTTPException(status_code=400, detail=f"Loan must be Pending to approve (currently {loan['status']})")
-    loan["status"] = "Approved"
-    loan["approved_by"] = body.officer_name or "Manager"
-    loan["approval_note"] = body.note
-    return _enrich_loan(loan)
-
-
-@router.patch("/loans/{loan_id}/reject")
-def reject_loan(loan_id: str, body: LoanActionRequest):
-    loan = next((l for l in MOCK_LOANS if l["id"] == loan_id), None)
-    if not loan:
-        raise HTTPException(status_code=404, detail="Loan not found")
-    if loan["status"] in ("Disbursed", "Closed"):
-        raise HTTPException(status_code=400, detail="Cannot reject a disbursed or closed loan")
-    loan["status"] = "Rejected"
-    loan["rejection_reason"] = body.note or "No reason provided"
-    return _enrich_loan(loan)
-
-
-@router.patch("/loans/{loan_id}/disburse")
-def disburse_loan(loan_id: str, body: LoanActionRequest):
-    loan = next((l for l in MOCK_LOANS if l["id"] == loan_id), None)
-    if not loan:
-        raise HTTPException(status_code=404, detail="Loan not found")
-    if loan["status"] != "Approved":
-        raise HTTPException(status_code=400, detail="Loan must be Approved before disbursement")
-    disbursed_date = date.today()
-    duration = body.duration_days or loan.get("duration_days", 90)
-    loan["status"] = "Disbursed"
-    loan["disbursed_by"] = body.officer_name or "Director"
-    loan["disbursed_date"] = disbursed_date.isoformat()
-    loan["due_date"] = (disbursed_date + timedelta(days=duration)).isoformat()
-    loan["duration_days"] = duration
-    return _enrich_loan(loan)
-
-
-@router.patch("/loans/{loan_id}/close")
-def close_loan(loan_id: str, body: LoanActionRequest):
-    loan = next((l for l in MOCK_LOANS if l["id"] == loan_id), None)
-    if not loan:
-        raise HTTPException(status_code=404, detail="Loan not found")
-    enriched = _enrich_loan(loan)
-    if loan["status"] != "Disbursed":
-        raise HTTPException(status_code=400, detail="Only disbursed loans can be closed")
-    if enriched["outstanding"] > 0:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Loan still has KES {enriched['outstanding']:,.2f} outstanding. Clear balance first."
-        )
-    loan["status"] = "Closed"
-    return _enrich_loan(loan)
-
-
-# ── REPAYMENT ROUTES ───────────────────────────────────────────────────────────
-
-@router.get("/repayments")
-def get_repayments(loan_id: str | None = None):
-    if loan_id:
-        return [r for r in MOCK_REPAYMENTS if r["loan_id"] == loan_id]
-    return MOCK_REPAYMENTS
-
-
-@router.post("/repayments", status_code=status.HTTP_201_CREATED)
-def create_repayment(request: RepaymentCreateRequest):
-    # Validate loan exists
-    loan = next((l for l in MOCK_LOANS if l["id"] == request.loan_id), None)
-    if not loan:
-        raise HTTPException(status_code=404, detail=f"Loan {request.loan_id} not found")
-    if loan["status"] not in ("Disbursed",):
-        raise HTTPException(status_code=400, detail="Can only record repayments for Disbursed loans")
-
-    new_id = f"RP-{len(MOCK_REPAYMENTS) + 1:03d}"
-    new_rep = {
-        "id": new_id,
-        "loan_id": request.loan_id,
-        "client": request.client,
-        "amount": request.amount,
-        "date": datetime.now().strftime("%Y-%m-%d"),
-        "mode": request.mode,
-        "reference": request.reference or f"REF-{datetime.now().strftime('%Y%m%d%H%M%S')}",
-        "recorded_by": request.recorded_by or "Loan Officer",
-        "verified": False,
-        "verified_by": None,
-        "verified_at": None,
-    }
-    MOCK_REPAYMENTS.insert(0, new_rep)
-    return new_rep
-
-
-@router.patch("/repayments/{repayment_id}/verify")
-def verify_repayment(repayment_id: str, body: RepaymentVerifyRequest):
-    rep = next((r for r in MOCK_REPAYMENTS if r["id"] == repayment_id), None)
-    if not rep:
-        raise HTTPException(status_code=404, detail="Repayment not found")
-    if rep.get("verified"):
-        raise HTTPException(status_code=400, detail="Payment already verified")
-    rep["verified"] = True
-    rep["verified_by"] = body.verified_by
-    rep["verified_at"] = datetime.now().strftime("%Y-%m-%d")
-    return rep
-
-
-# ── CLIENT ROUTES ──────────────────────────────────────────────────────────────
+# ── CLIENTS ────────────────────────────────────────────────────────────────────
 
 @router.get("/clients")
-def get_clients():
-    return MOCK_CLIENTS
+def get_clients(
+    search: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_permission(current_user, "clients.view")
+    stmt = select(Client).order_by(Client.client_number.desc())
+    if search:
+        stmt = stmt.where(Client.name.ilike(f"%{search}%"))
+    clients = db.scalars(stmt).all()
+    return [_serialize_client(c) for c in clients]
+
+
+@router.get("/clients/{client_id}")
+def get_client(
+    client_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_permission(current_user, "clients.view")
+    client = db.scalar(select(Client).where(Client.id == client_id))
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    return _serialize_client(client)
 
 
 @router.post("/clients", status_code=status.HTTP_201_CREATED)
-def create_client(request: ClientCreateRequest):
-    new_id = f"CL-{len(MOCK_CLIENTS) + 1:03d}"
-    new_client = request.model_dump()
-    new_client["id"] = new_id
-    new_client["date_registered"] = datetime.now().strftime("%Y-%m-%d")
-    MOCK_CLIENTS.insert(0, new_client)
-    return new_client
+def create_client(
+    request: ClientCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_permission(current_user, "clients.create")
+    client_number = loan_service._next_client_number(db)
+    client = Client(
+        client_number=client_number,
+        registered_by_id=current_user.id,
+        **{k: (
+            [d.model_dump() for d in v] if isinstance(v, list) else v
+        ) for k, v in request.model_dump().items()},
+    )
+    db.add(client)
+    db.commit()
+    db.refresh(client)
+    return _serialize_client(client)
 
 
-# ── REPORTS ROUTES ─────────────────────────────────────────────────────────────
+@router.put("/clients/{client_id}")
+def update_client(
+    client_id: UUID,
+    request: ClientCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_permission(current_user, "clients.edit")
+    client = db.scalar(select(Client).where(Client.id == client_id))
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    data = request.model_dump(exclude_unset=True)
+    for k, v in data.items():
+        if isinstance(v, list):
+            setattr(client, k, [i.model_dump() if hasattr(i, "model_dump") else i for i in v])
+        else:
+            setattr(client, k, v)
+    db.commit()
+    db.refresh(client)
+    return _serialize_client(client)
 
-@router.get("/reports/portfolio")
-def report_portfolio():
-    enriched = [_enrich_loan(l) for l in MOCK_LOANS]
-    total_disbursed = sum(l["amount"] for l in enriched if l["status"] in ("Disbursed", "Closed"))
-    total_outstanding = sum(l["outstanding"] for l in enriched if l["status"] == "Disbursed")
-    total_collected = sum(r["amount"] for r in MOCK_REPAYMENTS if r.get("verified"))
-    total_interest = sum(l["interest_amount"] for l in enriched if l["status"] in ("Disbursed", "Closed"))
-    total_penalties = sum(l["penalty_amount"] for l in enriched if l.get("is_overdue"))
 
-    by_status = {}
-    for l in enriched:
-        by_status[l["status"]] = by_status.get(l["status"], 0) + 1
-
-    by_sector = {}
-    for l in enriched:
-        by_sector[l["sector"]] = by_sector.get(l["sector"], {"count": 0, "amount": 0})
-        by_sector[l["sector"]]["count"] += 1
-        by_sector[l["sector"]]["amount"] += l["amount"]
-
+def _serialize_client(c: Client) -> dict:
     return {
-        "total_disbursed": total_disbursed,
-        "total_outstanding": total_outstanding,
-        "total_collected": total_collected,
-        "total_interest": total_interest,
-        "total_penalties": total_penalties,
-        "loan_count": len(MOCK_LOANS),
-        "active_loans": len([l for l in enriched if l["status"] in ("Pending", "Approved", "Disbursed")]),
-        "overdue_loans": len([l for l in enriched if l.get("is_overdue")]),
-        "by_status": by_status,
-        "by_sector": [{"sector": k, **v} for k, v in by_sector.items()],
-        "loans": enriched,
+        "id": str(c.id),
+        "client_number": c.client_number,
+        "name": c.name,
+        "phone": c.phone,
+        "email": c.email,
+        "id_no": c.id_no,
+        "pin": c.pin,
+        "gender": c.gender,
+        "marital_status": c.marital_status,
+        "occupation": c.occupation,
+        "address": c.address,
+        "period_years": c.period_years,
+        "accommodation": c.accommodation,
+        "landmark": c.landmark,
+        "residential_maps_link": c.residential_maps_link,
+        "business_maps_link": c.business_maps_link,
+        "spouse_name": c.spouse_name,
+        "spouse_id": c.spouse_id,
+        "spouse_phone": c.spouse_phone,
+        "spouse_occupation": c.spouse_occupation,
+        "spouse_address": c.spouse_address,
+        "applicant_dependants": c.applicant_dependants or [],
+        "spouse_dependants": c.spouse_dependants or [],
+        "dependants_count": c.dependants_count,
+        "dependants_ages": c.dependants_ages,
+        "school_going_count": c.school_going_count,
+        "school_details": c.school_details,
+        "next_of_kin_list": c.next_of_kin_list or [],
+        "business_name": c.business_name,
+        "business_type": c.business_type,
+        "business_sector_custom": c.business_sector_custom,
+        "business_landmark": c.business_landmark,
+        "business_years": c.business_years,
+        "business_location": c.business_location,
+        "guarantor_surname": c.guarantor_surname,
+        "guarantor_first_name": c.guarantor_first_name,
+        "guarantor_middle_name": c.guarantor_middle_name,
+        "guarantor_id_no": c.guarantor_id_no,
+        "guarantor_phone": c.guarantor_phone,
+        "guarantor_relationship": c.guarantor_relationship,
+        "guarantor_address": c.guarantor_address,
+        "guarantor_occupation": c.guarantor_occupation,
+        "guarantor_period_known": c.guarantor_period_known,
+        "properties_list": c.properties_list or [],
+        "applicant_id_photo": c.applicant_id_photo,
+        "applicant_passport_photo": c.applicant_passport_photo,
+        "business_photo": c.business_photo,
+        "guarantor_id_photo": c.guarantor_id_photo,
+        "guarantor_passport_photo": c.guarantor_passport_photo,
+        "applicant_signature": c.applicant_signature,
+        "guarantor_signature": c.guarantor_signature,
+        "registration_fee": c.registration_fee,
+        "application_fee": c.application_fee,
+        "branch": c.branch.name if c.branch else None,
+        "branch_id": str(c.branch_id) if c.branch_id else None,
+        "registered_by": c.registered_by.full_name if c.registered_by else None,
+        "created_at": c.created_at.isoformat() if c.created_at else None,
     }
 
 
-@router.get("/reports/arrears")
-def report_arrears():
-    enriched = [_enrich_loan(l) for l in MOCK_LOANS]
-    overdue = [l for l in enriched if l.get("is_overdue") and l["status"] == "Disbursed"]
-    total_penalty_exposure = sum(l["penalty_amount"] for l in overdue)
-    total_overdue_outstanding = sum(l["outstanding"] for l in overdue)
+# ── LOAN PRODUCTS ──────────────────────────────────────────────────────────────
+
+@router.get("/loan-products")
+def get_loan_products(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    products = db.scalars(select(LoanProduct).where(LoanProduct.is_active == True).order_by(LoanProduct.name)).all()
+    return [
+        {
+            "id": str(p.id),
+            "name": p.name,
+            "product_type": p.product_type.value,
+            "duration_days": p.duration_days,
+            "interest_rate": float(p.interest_rate),
+            "penalty_rate": float(p.penalty_rate),
+            "penalty_interval_days": p.penalty_interval_days,
+            "max_penalty_amount": float(p.max_penalty_amount) if p.max_penalty_amount else None,
+        }
+        for p in products
+    ]
+
+
+# ── LOANS ──────────────────────────────────────────────────────────────────────
+
+@router.get("/loans")
+def get_loans(
+    status_filter: Optional[str] = Query(None, alias="status"),
+    client_id: Optional[UUID] = Query(None),
+    branch_id: Optional[UUID] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_permission(current_user, "loans.view")
+    stmt = (
+        select(Loan)
+        .options(
+            joinedload(Loan.client),
+            joinedload(Loan.loan_product),
+            joinedload(Loan.branch),
+            joinedload(Loan.submitted_by),
+            joinedload(Loan.approved_by),
+            joinedload(Loan.disbursed_by),
+        )
+        .order_by(Loan.created_at.desc())
+    )
+    if client_id:
+        stmt = stmt.where(Loan.client_id == client_id)
+    if branch_id:
+        stmt = stmt.where(Loan.branch_id == branch_id)
+
+    loans = db.scalars(stmt).unique().all()
+    enriched = [_enrich_loan(loan, db) for loan in loans]
+
+    # Apply computed status filter after enrichment
+    if status_filter:
+        enriched = [l for l in enriched if l["status"].lower() == status_filter.lower()]
+    return enriched
+
+
+@router.get("/loans/{loan_id}")
+def get_loan(
+    loan_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_permission(current_user, "loans.view")
+    loan = _load_loan(loan_id, db)
+    result = _enrich_loan(loan, db)
+    # Include installments
+    installments = db.scalars(
+        select(Installment).where(Installment.loan_id == loan_id).order_by(Installment.due_date)
+    ).all()
+    result["installments"] = [
+        {
+            "id": str(i.id),
+            "due_date": i.due_date.date().isoformat(),
+            "amount": float(i.amount),
+            "status": i.status.value,
+            "paid_at": i.paid_at.isoformat() if i.paid_at else None,
+        }
+        for i in installments
+    ]
+    return result
+
+
+@router.get("/installments/calendar")
+def get_installments_calendar(
+    weeks_ahead: int = Query(8, ge=1, le=26),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Returns installments for active loans covering 2 weeks past + N weeks ahead."""
+    _require_permission(current_user, "loans.view")
+    from datetime import timedelta, date as date_type
+    today = datetime.now(timezone.utc).date()
+    start = today - timedelta(days=14)
+    end = today + timedelta(weeks=weeks_ahead)
+
+    rows = db.scalars(
+        select(Installment)
+        .join(Loan, Installment.loan_id == Loan.id)
+        .options(joinedload(Installment.loan).joinedload(Loan.client))
+        .where(
+            Loan.status == LoanStatus.DISBURSED,
+            Installment.due_date >= start,
+            Installment.due_date <= end,
+        )
+        .order_by(Installment.due_date)
+    ).unique().all()
+
+    events = []
+    for i in rows:
+        due = i.due_date if isinstance(i.due_date, date_type) else i.due_date.date()
+        is_overdue = due < today and i.status.value != "paid"
+        events.append({
+            "id": str(i.id),
+            "loan_id": str(i.loan_id),
+            "loan_number": i.loan.loan_number if i.loan else "",
+            "client": i.loan.client.name if (i.loan and i.loan.client) else "",
+            "client_phone": i.loan.client.phone if (i.loan and i.loan.client) else "",
+            "due_date": due.isoformat(),
+            "amount": float(i.amount),
+            "status": i.status.value,
+            "is_overdue": is_overdue,
+            "is_today": due == today,
+            "days_overdue": (today - due).days if is_overdue else 0,
+        })
+
+    return {"period": {"from": start.isoformat(), "to": end.isoformat()}, "total": len(events), "events": events}
+
+
+@router.post("/loans", status_code=status.HTTP_201_CREATED)
+def create_loan(
+    request: LoanCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_permission(current_user, "loans.create")
+
+    client = db.scalar(select(Client).where(Client.id == request.client_id))
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    product = db.scalar(select(LoanProduct).where(LoanProduct.id == request.loan_product_id))
+    if not product:
+        raise HTTPException(status_code=404, detail="Loan product not found")
+
+    amount = Decimal(str(request.amount))
+    is_existing = db.scalar(
+        select(func.count()).select_from(Loan).where(Loan.client_id == request.client_id)
+    ) > 0
+    fee = loan_service.calculate_application_fee(amount, is_existing)
+
+    loan = Loan(
+        loan_number=loan_service._next_loan_number(db),
+        client_id=request.client_id,
+        loan_product_id=request.loan_product_id,
+        branch_id=request.branch_id or client.branch_id,
+        amount=amount,
+        application_fee=fee,
+        duration_days=product.duration_days,
+        sector=request.sector,
+        notes=request.notes,
+        status=LoanStatus.PENDING,
+        submitted_by_id=current_user.id,
+        date_submitted=datetime.now(timezone.utc),
+    )
+    db.add(loan)
+    db.commit()
+    db.refresh(loan)
+    return _enrich_loan(loan, db)
+
+
+@router.patch("/loans/{loan_id}/approve")
+def approve_loan(
+    loan_id: UUID,
+    request: LoanActionRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_permission(current_user, "loans.approve")
+    loan = _load_loan(loan_id, db)
+    try:
+        loan_service.approve_loan(db, loan, current_user.id, request.note)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    db.commit()
+    return _enrich_loan(loan, db)
+
+
+@router.patch("/loans/{loan_id}/reject")
+def reject_loan(
+    loan_id: UUID,
+    request: LoanActionRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_permission(current_user, "loans.approve")
+    loan = _load_loan(loan_id, db)
+    try:
+        loan_service.reject_loan(db, loan, current_user.id, request.note)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    db.commit()
+    return _enrich_loan(loan, db)
+
+
+@router.patch("/loans/{loan_id}/disburse")
+def disburse_loan(
+    loan_id: UUID,
+    request: LoanActionRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_permission(current_user, "loans.disburse")
+    loan = _load_loan(loan_id, db)
+    if not loan.loan_product:
+        raise HTTPException(status_code=400, detail="Loan has no product assigned")
+    try:
+        loan_service.disburse_loan(db, loan, current_user.id, loan.loan_product)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    db.commit()
+    return _enrich_loan(loan, db)
+
+
+@router.patch("/loans/{loan_id}/close")
+def close_loan(
+    loan_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_permission(current_user, "loans.disburse")
+    loan = _load_loan(loan_id, db)
+    outstanding = loan_service.get_outstanding(db, loan)
+    if outstanding > Decimal("0"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot close: KES {outstanding:,.2f} still outstanding",
+        )
+    try:
+        loan_service.close_loan(db, loan, current_user.id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    db.commit()
+    return _enrich_loan(loan, db)
+
+
+def _load_loan(loan_id: UUID, db: Session) -> Loan:
+    loan = db.scalar(
+        select(Loan)
+        .options(
+            joinedload(Loan.client),
+            joinedload(Loan.loan_product),
+            joinedload(Loan.branch),
+            joinedload(Loan.submitted_by),
+            joinedload(Loan.approved_by),
+            joinedload(Loan.disbursed_by),
+        )
+        .where(Loan.id == loan_id)
+    )
+    if not loan:
+        raise HTTPException(status_code=404, detail="Loan not found")
+    return loan
+
+
+# ── REPAYMENTS ─────────────────────────────────────────────────────────────────
+
+@router.get("/repayments")
+def get_repayments(
+    loan_id: Optional[UUID] = Query(None),
+    verified: Optional[bool] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_permission(current_user, "repayments.view")
+    stmt = (
+        select(Repayment)
+        .options(
+            joinedload(Repayment.loan),
+            joinedload(Repayment.client),
+            joinedload(Repayment.recorded_by),
+            joinedload(Repayment.verified_by),
+        )
+        .order_by(Repayment.date.desc())
+    )
+    if loan_id:
+        stmt = stmt.where(Repayment.loan_id == loan_id)
+    if verified is not None:
+        stmt = stmt.where(Repayment.verified == verified)
+
+    repayments = db.scalars(stmt).unique().all()
+    return [_serialize_repayment(r) for r in repayments]
+
+
+@router.post("/repayments", status_code=status.HTTP_201_CREATED)
+def create_repayment(
+    request: RepaymentCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_permission(current_user, "repayments.create")
+    loan = db.scalar(select(Loan).options(joinedload(Loan.client)).where(Loan.id == request.loan_id))
+    if not loan:
+        raise HTTPException(status_code=404, detail="Loan not found")
+    if loan.status != LoanStatus.DISBURSED:
+        raise HTTPException(status_code=400, detail="Can only record repayments on disbursed loans")
+
+    # Parse payment mode
+    mode_map = {
+        "cash": PaymentMode.CASH,
+        "mpesa": PaymentMode.MPESA,
+        "m-pesa": PaymentMode.MPESA,
+        "bank": PaymentMode.BANK_TRANSFER,
+        "banktransfer": PaymentMode.BANK_TRANSFER,
+        "cheque": PaymentMode.CHEQUE,
+    }
+    pay_mode = mode_map.get(request.mode.lower().replace(" ", ""), PaymentMode.CASH)
+
+    payment_date = (
+        datetime.fromisoformat(request.date).replace(tzinfo=timezone.utc)
+        if request.date
+        else datetime.now(timezone.utc)
+    )
+
+    repayment = Repayment(
+        loan_id=loan.id,
+        client_id=loan.client_id,
+        amount=Decimal(str(request.amount)),
+        date=payment_date,
+        mode=pay_mode,
+        reference=request.reference,
+        notes=request.notes,
+        recorded_by_id=current_user.id,
+        verified=False,
+    )
+    db.add(repayment)
+    db.commit()
+    db.refresh(repayment)
+    return _serialize_repayment(repayment)
+
+
+@router.patch("/repayments/{repayment_id}/verify")
+def verify_repayment(
+    repayment_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_permission(current_user, "repayments.verify")
+    repayment = db.scalar(
+        select(Repayment)
+        .options(joinedload(Repayment.loan), joinedload(Repayment.client), joinedload(Repayment.recorded_by), joinedload(Repayment.verified_by))
+        .where(Repayment.id == repayment_id)
+    )
+    if not repayment:
+        raise HTTPException(status_code=404, detail="Repayment not found")
+    if repayment.verified:
+        raise HTTPException(status_code=400, detail="Already verified")
+    repayment.verified = True
+    repayment.verified_by_id = current_user.id
+    repayment.verified_at = datetime.now(timezone.utc)
+    db.commit()
+    return _serialize_repayment(repayment)
+
+
+def _serialize_repayment(r: Repayment) -> dict:
     return {
-        "overdue_loans": overdue,
-        "count": len(overdue),
-        "total_penalty_exposure": total_penalty_exposure,
-        "total_overdue_outstanding": total_overdue_outstanding,
+        "id": str(r.id),
+        "loan_id": str(r.loan_id),
+        "loan_number": r.loan.loan_number if r.loan else None,
+        "client": r.client.name if r.client else "",
+        "client_id": str(r.client_id),
+        "amount": float(r.amount),
+        "date": r.date.date().isoformat() if r.date else None,
+        "mode": r.mode.value,
+        "reference": r.reference,
+        "notes": r.notes,
+        "recorded_by": r.recorded_by.full_name if r.recorded_by else None,
+        "verified": r.verified,
+        "verified_by": r.verified_by.full_name if r.verified_by else None,
+        "verified_at": r.verified_at.isoformat() if r.verified_at else None,
     }
 
 
-@router.get("/reports/collections")
-def report_collections(date_from: str | None = None, date_to: str | None = None):
-    reps = [r for r in MOCK_REPAYMENTS if r.get("verified")]
+# ── DASHBOARD STATS ────────────────────────────────────────────────────────────
 
-    if date_from:
-        reps = [r for r in reps if r["date"] >= date_from]
-    if date_to:
-        reps = [r for r in reps if r["date"] <= date_to]
+@router.get("/dashboard/stats")
+def get_dashboard_stats(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    total_clients = db.scalar(select(func.count()).select_from(Client)) or 0
+    total_loans = db.scalar(select(func.count()).select_from(Loan)) or 0
+    active_loans = db.scalar(select(func.count()).select_from(Loan).where(Loan.status == LoanStatus.DISBURSED)) or 0
+    pending_loans = db.scalar(select(func.count()).select_from(Loan).where(Loan.status == LoanStatus.PENDING)) or 0
 
-    by_mode: dict = {}
-    for r in reps:
-        by_mode[r["mode"]] = by_mode.get(r["mode"], 0) + r["amount"]
+    total_disbursed = db.scalar(
+        select(func.coalesce(func.sum(Loan.amount), 0)).where(Loan.status.in_([LoanStatus.DISBURSED, LoanStatus.CLOSED]))
+    ) or Decimal("0")
 
-    by_loan: dict = {}
-    for r in reps:
-        loan_id = r["loan_id"]
-        if loan_id not in by_loan:
-            by_loan[loan_id] = {"loan_id": loan_id, "client": r["client"], "amount": 0, "count": 0}
-        by_loan[loan_id]["amount"] += r["amount"]
-        by_loan[loan_id]["count"] += 1
+    total_collected = db.scalar(
+        select(func.coalesce(func.sum(Repayment.amount), 0)).where(Repayment.verified == True)
+    ) or Decimal("0")
+
+    unverified_repayments = db.scalar(
+        select(func.count()).select_from(Repayment).where(Repayment.verified == False)
+    ) or 0
 
     return {
-        "total_collected": sum(r["amount"] for r in reps),
-        "payment_count": len(reps),
-        "by_mode": [{"mode": k, "amount": v} for k, v in by_mode.items()],
-        "by_loan": list(by_loan.values()),
-        "repayments": reps,
-        "date_from": date_from,
-        "date_to": date_to,
+        "total_clients": total_clients,
+        "total_loans": total_loans,
+        "active_loans": active_loans,
+        "pending_loans": pending_loans,
+        "total_disbursed": float(total_disbursed),
+        "total_collected": float(total_collected),
+        "unverified_repayments": unverified_repayments,
     }
 
 
-@router.get("/reports/clients")
-def report_clients():
-    by_sector: dict = {}
-    for c in MOCK_CLIENTS:
-        s = c.get("business_type", "Other")
-        by_sector[s] = by_sector.get(s, 0) + 1
+# ── BRANCHES ───────────────────────────────────────────────────────────────────
 
-    return {
-        "total_clients": len(MOCK_CLIENTS),
-        "by_sector": [{"sector": k, "count": v} for k, v in by_sector.items()],
-        "recent": MOCK_CLIENTS[:5],
-    }
+@router.get("/branches")
+def get_branches(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    branches = db.scalars(select(Branch).where(Branch.active == True).order_by(Branch.name)).all()
+    return [{"id": str(b.id), "name": b.name, "code": b.code, "active": b.active} for b in branches]

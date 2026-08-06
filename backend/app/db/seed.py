@@ -8,6 +8,7 @@ from app.core.permissions import PERMISSIONS
 from app.db.session import SessionLocal
 from app.db.seed_data import ROLES, USERS
 from app.models.branch import Branch
+from app.models.loan_product import LoanProduct
 from app.models.permission import Permission
 from app.models.role import Role
 from app.models.role_permission import RolePermission
@@ -15,6 +16,7 @@ from app.models.user import User
 from app.models.user_branch import UserBranch
 from app.models.user_role import UserRole
 from app.core.security import get_password_hash
+from app.models.enums import LoanProductType
 
 
 def log(message: str) -> None:
@@ -118,6 +120,7 @@ ROLE_PERMISSIONS = {
         "dashboard.view",
         "repayments.view",
         "repayments.record",
+        "repayments.verify",
         "expenses.view",
         "expenses.create",
         "expenses.approve",
@@ -269,6 +272,51 @@ def seed_users(db: Session) -> None:
 
     log("Users seeded.")
 
+
+LOAN_PRODUCTS = [
+    {
+        "name": "Faraja 4 Weeks",
+        "product_type": LoanProductType.FARAJA_4_WEEKS,
+        "duration_days": 28,
+        "interest_rate": Decimal("0.2000"),
+        "penalty_rate": Decimal("0.0300"),
+        "penalty_interval_days": 2,
+        "max_penalty_amount": None,
+        "is_active": True,
+    },
+    {
+        "name": "Faraja 5 Weeks",
+        "product_type": LoanProductType.FARAJA_5_WEEKS,
+        "duration_days": 35,
+        "interest_rate": Decimal("0.3000"),
+        "penalty_rate": Decimal("0.0300"),
+        "penalty_interval_days": 2,
+        "max_penalty_amount": None,
+        "is_active": True,
+    },
+    {
+        "name": "Lumpsum",
+        "product_type": LoanProductType.LUMPSUM,
+        "duration_days": 90,
+        "interest_rate": Decimal("0.2000"),  # TBD — using 20% placeholder
+        "penalty_rate": Decimal("0.0300"),
+        "penalty_interval_days": 2,
+        "max_penalty_amount": None,
+        "is_active": True,
+    },
+]
+
+
+def seed_loan_products(db: Session) -> None:
+    log("Seeding loan products...")
+    for p in LOAN_PRODUCTS:
+        existing = db.scalar(select(LoanProduct).where(LoanProduct.name == p["name"]))
+        if not existing:
+            db.add(LoanProduct(**p))
+    db.flush()
+    log(f"Seeded {len(LOAN_PRODUCTS)} loan products")
+
+
 def seed() -> None:
 
     db = SessionLocal()
@@ -284,6 +332,8 @@ def seed() -> None:
         seed_role_permissions(db)
 
         seed_users(db)
+
+        seed_loan_products(db)
 
         db.commit()
 
