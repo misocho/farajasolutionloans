@@ -280,6 +280,35 @@ export async function deactivateBranchApi(id: string): Promise<{ status: string;
   return res.data;
 }
 
+// ── Installment Calendar API ──────────────────────────────────────────────────
+
+export interface InstallmentEvent {
+  id: string;
+  loan_id: string;
+  loan_number: string;
+  client: string;
+  client_phone: string;
+  due_date: string;
+  amount: number;
+  status: string;
+  is_overdue: boolean;
+  is_today: boolean;
+  days_overdue: number;
+}
+
+export interface InstallmentCalendarResponse {
+  period: { from: string; to: string };
+  total: number;
+  events: InstallmentEvent[];
+}
+
+export async function fetchInstallmentCalendarApi(weeksAhead = 8): Promise<InstallmentCalendarResponse> {
+  const res = await api.get<InstallmentCalendarResponse>("/installments/calendar", {
+    params: { weeks_ahead: weeksAhead },
+  });
+  return res.data;
+}
+
 // ── Notifications API ─────────────────────────────────────────────────────────
 
 export interface AppNotification {

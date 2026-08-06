@@ -10,3 +10,13 @@ export async function fetchMeApi(): Promise<UserProfile> {
   const response = await api.get<UserProfile>("/auth/me");
   return response.data;
 }
+
+export interface AcceptInviteResponse {
+  message: string;
+  employee_number: string;
+}
+
+export async function acceptInviteApi(data: { token: string; password: string }): Promise<AcceptInviteResponse> {
+  const response = await api.post<AcceptInviteResponse>("/auth/accept-invite", data);
+  return response.data;
+}

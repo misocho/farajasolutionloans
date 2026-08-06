@@ -1,255 +1,306 @@
 """
-Branches Router — Faraja Solution Loans
+Branches Router — Faraja Solution Loans (PostgreSQL)
 
-Manages branch offices: create, list, update, and deactivate.
-Each branch has aggregated stats derived from loans/clients data.
+GET    /branches                     — list all branches with real stats
+GET    /branches/{id}                — single branch detail + users
+POST   /branches                     — create branch (branches.manage)
+PATCH  /branches/{id}                — update branch (branches.manage)
+DELETE /branches/{id}                — soft-deactivate (branches.manage)
+GET    /branches/{id}/users          — list users assigned to branch
+POST   /branches/{id}/users          — assign user to branch (branches.manage)
+DELETE /branches/{id}/users/{uid}    — remove user from branch (branches.manage)
 """
+from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel
+from decimal import Decimal
 from typing import Optional
-from datetime import datetime
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
+from app.api.dependencies.auth import get_current_user
+from app.db.session import get_db
+from app.models.branch import Branch
+from app.models.client import Client
+from app.models.enums import LoanStatus
+from app.models.loan import Loan
+from app.models.repayment import Repayment
+from app.models.user import User
+from app.models.user_branch import UserBranch
 
 router = APIRouter()
 
 
-# ── Schemas ────────────────────────────────────────────────────────────────────
+# ── Permission helper ─────────────────────────────────────────────────────────
+
+def _require_permission(user: User, perm: str) -> None:
+    user_perms = {rp.permission.name for ur in user.roles for rp in ur.role.permissions}
+    if perm not in user_perms:
+        raise HTTPException(status_code=403, detail=f"Permission '{perm}' required.")
+
+
+# ── Schemas ───────────────────────────────────────────────────────────────────
 
 class BranchCreateRequest(BaseModel):
     name: str
-    location: str
-    manager_name: Optional[str] = None
-    manager_phone: Optional[str] = None
+    code: str
+    address: Optional[str] = None
     phone: Optional[str] = None
     email: Optional[str] = None
-    is_active: bool = True
 
 
 class BranchUpdateRequest(BaseModel):
     name: Optional[str] = None
-    location: Optional[str] = None
-    manager_name: Optional[str] = None
-    manager_phone: Optional[str] = None
+    code: Optional[str] = None
+    address: Optional[str] = None
     phone: Optional[str] = None
     email: Optional[str] = None
-    is_active: Optional[bool] = None
+    active: Optional[bool] = None
 
 
-# ── In-Memory Store ────────────────────────────────────────────────────────────
-
-MOCK_BRANCHES: list[dict] = [
-    {
-        "id": "BR-001",
-        "name": "Head Office — Miritini",
-        "location": "Miritini, Mombasa County",
-        "manager_name": "John Mwangi",
-        "manager_phone": "+254 722 100 001",
-        "phone": "+254 41 222 0001",
-        "email": "headoffice@farajasolutions.co.ke",
-        "is_active": True,
-        "created_at": "2024-01-15",
-        # Demo stats — will be replaced by real aggregation once DB is live
-        "stats": {
-            "total_clients": 48,
-            "active_loans": 12,
-            "disbursed_amount": 8200000,
-            "collected_amount": 3100000,
-            "overdue_loans": 2,
-        },
-    },
-    {
-        "id": "BR-002",
-        "name": "Mombasa CBD Branch",
-        "location": "Moi Avenue, Mombasa CBD",
-        "manager_name": "Grace Njeri",
-        "manager_phone": "+254 733 200 002",
-        "phone": "+254 41 222 1002",
-        "email": "mombasa@farajasolutions.co.ke",
-        "is_active": True,
-        "created_at": "2024-03-01",
-        "stats": {
-            "total_clients": 31,
-            "active_loans": 8,
-            "disbursed_amount": 4500000,
-            "collected_amount": 1800000,
-            "overdue_loans": 1,
-        },
-    },
-    {
-        "id": "BR-003",
-        "name": "Kilifi Branch",
-        "location": "Kilifi Town, Kilifi County",
-        "manager_name": "Peter Otieno",
-        "manager_phone": "+254 711 300 003",
-        "phone": "+254 41 522 3003",
-        "email": "kilifi@farajasolutions.co.ke",
-        "is_active": True,
-        "created_at": "2024-06-10",
-        "stats": {
-            "total_clients": 19,
-            "active_loans": 5,
-            "disbursed_amount": 2800000,
-            "collected_amount": 900000,
-            "overdue_loans": 1,
-        },
-    },
-    {
-        "id": "BR-004",
-        "name": "Malindi Branch",
-        "location": "Lamu Road, Malindi",
-        "manager_name": "Amina Hassan",
-        "manager_phone": "+254 744 400 004",
-        "phone": "+254 42 212 4004",
-        "email": "malindi@farajasolutions.co.ke",
-        "is_active": False,
-        "created_at": "2025-01-20",
-        "stats": {
-            "total_clients": 7,
-            "active_loans": 0,
-            "disbursed_amount": 600000,
-            "collected_amount": 600000,
-            "overdue_loans": 0,
-        },
-    },
-]
+class AssignUserRequest(BaseModel):
+    user_id: UUID
 
 
-# ── Routes ─────────────────────────────────────────────────────────────────────
+# ── Serializers ───────────────────────────────────────────────────────────────
+
+def _branch_stats(branch_id: UUID, db: Session) -> dict:
+    total_clients = db.scalar(
+        select(func.count()).select_from(Client).where(Client.branch_id == branch_id)
+    ) or 0
+
+    active_loans = db.scalar(
+        select(func.count()).select_from(Loan).where(
+            Loan.branch_id == branch_id, Loan.status == LoanStatus.DISBURSED
+        )
+    ) or 0
+
+    overdue_loans = db.scalar(
+        select(func.count()).select_from(Loan).where(
+            Loan.branch_id == branch_id,
+            Loan.status == LoanStatus.DISBURSED,
+            Loan.due_date < func.now(),
+        )
+    ) or 0
+
+    disbursed_amount = db.scalar(
+        select(func.coalesce(func.sum(Loan.amount), 0)).where(
+            Loan.branch_id == branch_id,
+            Loan.status.in_([LoanStatus.DISBURSED, LoanStatus.CLOSED]),
+        )
+    ) or Decimal("0")
+
+    collected_amount = db.scalar(
+        select(func.coalesce(func.sum(Repayment.amount), 0))
+        .join(Loan, Repayment.loan_id == Loan.id)
+        .where(Loan.branch_id == branch_id, Repayment.verified == True)
+    ) or Decimal("0")
+
+    return {
+        "total_clients": total_clients,
+        "active_loans": active_loans,
+        "overdue_loans": overdue_loans,
+        "disbursed_amount": float(disbursed_amount),
+        "collected_amount": float(collected_amount),
+    }
+
+
+def _serialize_branch(b: Branch, db: Session, include_stats: bool = True) -> dict:
+    out: dict = {
+        "id": str(b.id),
+        "name": b.name,
+        "code": b.code,
+        "address": b.address,
+        "phone": b.phone,
+        "email": b.email,
+        "active": b.active,
+        "is_active": b.active,   # frontend compat alias
+        "created_at": b.created_at.isoformat() if b.created_at else None,
+        "stats": _branch_stats(b.id, db) if include_stats else {},
+    }
+    return out
+
+
+def _serialize_user(u: User) -> dict:
+    role_names = [ur.role.name for ur in u.roles]
+    branch_ids = [str(ub.branch_id) for ub in u.branches]
+    return {
+        "id": str(u.id),
+        "first_name": u.first_name,
+        "last_name": u.last_name,
+        "full_name": u.full_name,
+        "email": u.email,
+        "employee_number": u.employee_number,
+        "is_active": u.is_active,
+        "roles": role_names,
+        "branch_ids": branch_ids,
+    }
+
+
+# ── Routes ────────────────────────────────────────────────────────────────────
 
 @router.get("/branches")
-def get_branches():
-    return MOCK_BRANCHES
+def get_branches(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_permission(current_user, "branches.view")
+    branches = db.scalars(select(Branch).order_by(Branch.name)).all()
+    return [_serialize_branch(b, db) for b in branches]
 
 
 @router.get("/branches/{branch_id}")
-def get_branch(branch_id: str):
-    branch = next((b for b in MOCK_BRANCHES if b["id"] == branch_id), None)
+def get_branch(
+    branch_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_permission(current_user, "branches.view")
+    branch = db.scalar(select(Branch).where(Branch.id == branch_id))
     if not branch:
         raise HTTPException(status_code=404, detail="Branch not found")
-    return branch
+    return _serialize_branch(branch, db)
 
 
 @router.post("/branches", status_code=status.HTTP_201_CREATED)
-def create_branch(request: BranchCreateRequest):
-    new_id = f"BR-{len(MOCK_BRANCHES) + 1:03d}"
-    new_branch = {
-        "id": new_id,
-        "name": request.name,
-        "location": request.location,
-        "manager_name": request.manager_name or "—",
-        "manager_phone": request.manager_phone or "—",
-        "phone": request.phone or "—",
-        "email": request.email or "—",
-        "is_active": request.is_active,
-        "created_at": datetime.now().strftime("%Y-%m-%d"),
-        "stats": {
-            "total_clients": 0,
-            "active_loans": 0,
-            "disbursed_amount": 0,
-            "collected_amount": 0,
-            "overdue_loans": 0,
-        },
-    }
-    MOCK_BRANCHES.append(new_branch)
-    return new_branch
+def create_branch(
+    request: BranchCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_permission(current_user, "branches.manage")
+
+    # Check uniqueness
+    if db.scalar(select(Branch).where(Branch.name == request.name)):
+        raise HTTPException(status_code=409, detail="A branch with this name already exists.")
+    if db.scalar(select(Branch).where(Branch.code == request.code.upper())):
+        raise HTTPException(status_code=409, detail="A branch with this code already exists.")
+
+    branch = Branch(
+        name=request.name,
+        code=request.code.upper(),
+        address=request.address,
+        phone=request.phone,
+        email=request.email,
+        active=True,
+    )
+    db.add(branch)
+    db.commit()
+    db.refresh(branch)
+    return _serialize_branch(branch, db)
 
 
 @router.patch("/branches/{branch_id}")
-def update_branch(branch_id: str, request: BranchUpdateRequest):
-    branch = next((b for b in MOCK_BRANCHES if b["id"] == branch_id), None)
+def update_branch(
+    branch_id: UUID,
+    request: BranchUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_permission(current_user, "branches.manage")
+    branch = db.scalar(select(Branch).where(Branch.id == branch_id))
     if not branch:
         raise HTTPException(status_code=404, detail="Branch not found")
-    update_data = request.model_dump(exclude_none=True)
-    branch.update(update_data)
-    return branch
+
+    data = request.model_dump(exclude_unset=True)
+    for k, v in data.items():
+        setattr(branch, k, v)
+
+    db.commit()
+    db.refresh(branch)
+    return _serialize_branch(branch, db)
 
 
 @router.delete("/branches/{branch_id}", status_code=status.HTTP_200_OK)
-def deactivate_branch(branch_id: str):
-    branch = next((b for b in MOCK_BRANCHES if b["id"] == branch_id), None)
+def deactivate_branch(
+    branch_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_permission(current_user, "branches.manage")
+    branch = db.scalar(select(Branch).where(Branch.id == branch_id))
     if not branch:
         raise HTTPException(status_code=404, detail="Branch not found")
-    branch["is_active"] = False
-    return {"status": "success", "message": f"Branch {branch['name']} deactivated"}
+    branch.active = False
+    db.commit()
+    return {"status": "ok", "message": f"Branch '{branch.name}' deactivated."}
 
 
-# ── Notifications (aggregated from pending system events) ──────────────────────
+# ── Branch ↔ User assignment ──────────────────────────────────────────────────
 
-@router.get("/notifications")
-def get_notifications():
-    """
-    Derive live notifications from loan & repayment state.
-    Imported here to avoid circular imports with loans_clients.
-    """
-    from app.api.routers.loans_clients import MOCK_LOANS, MOCK_REPAYMENTS
+@router.get("/branches/{branch_id}/users")
+def get_branch_users(
+    branch_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_permission(current_user, "branches.view")
+    branch = db.scalar(select(Branch).where(Branch.id == branch_id))
+    if not branch:
+        raise HTTPException(status_code=404, detail="Branch not found")
 
-    notifications = []
-    now = datetime.now()
+    user_branches = db.scalars(
+        select(UserBranch).where(UserBranch.branch_id == branch_id)
+    ).all()
+    users = []
+    for ub in user_branches:
+        u = db.scalar(select(User).where(User.id == ub.user_id))
+        if u:
+            users.append(_serialize_user(u))
+    return users
 
-    # Pending loan approvals — alert managers
-    pending_loans = [l for l in MOCK_LOANS if l.get("status") == "Pending"]
-    for loan in pending_loans:
-        notifications.append({
-            "id": f"notif-loan-pending-{loan['id']}",
-            "type": "loan_pending",
-            "title": "Loan Awaiting Approval",
-            "description": f"{loan['client']} submitted a loan application of KES {loan['amount']:,.0f}. Awaiting Manager review.",
-            "time": loan.get("date", ""),
-            "read": False,
-            "priority": "high",
-            "loan_id": loan["id"],
-        })
 
-    # Approved loans waiting disbursement — alert director
-    approved_loans = [l for l in MOCK_LOANS if l.get("status") == "Approved"]
-    for loan in approved_loans:
-        notifications.append({
-            "id": f"notif-loan-approved-{loan['id']}",
-            "type": "loan_approved",
-            "title": "Loan Ready for Disbursement",
-            "description": f"Loan {loan['id']} for {loan['client']} (KES {loan['amount']:,.0f}) has been approved. Awaiting Director disbursement.",
-            "time": loan.get("date", ""),
-            "read": False,
-            "priority": "high",
-            "loan_id": loan["id"],
-        })
+@router.post("/branches/{branch_id}/users", status_code=status.HTTP_201_CREATED)
+def assign_user_to_branch(
+    branch_id: UUID,
+    request: AssignUserRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_permission(current_user, "branches.manage")
 
-    # Unverified repayments — alert managers/directors
-    unverified = [r for r in MOCK_REPAYMENTS if not r.get("verified")]
-    for rep in unverified:
-        notifications.append({
-            "id": f"notif-rep-unverified-{rep['id']}",
-            "type": "repayment_pending",
-            "title": "Payment Awaiting Verification",
-            "description": f"KES {rep['amount']:,.0f} received from {rep['client']} via {rep['mode']} (Ref: {rep['reference']}) is unverified.",
-            "time": rep.get("date", ""),
-            "read": False,
-            "priority": "medium",
-            "repayment_id": rep["id"],
-        })
+    branch = db.scalar(select(Branch).where(Branch.id == branch_id))
+    if not branch:
+        raise HTTPException(status_code=404, detail="Branch not found")
 
-    # Overdue loans
-    from app.api.routers.loans_clients import _calc_penalty, _enrich_loan
-    for loan in MOCK_LOANS:
-        enriched = _enrich_loan(loan)
-        if enriched.get("is_overdue"):
-            notifications.append({
-                "id": f"notif-overdue-{loan['id']}",
-                "type": "overdue",
-                "title": "Overdue Loan Alert",
-                "description": f"{loan['client']} — Loan {loan['id']} is {enriched['days_overdue']} days overdue. Penalty: KES {enriched['penalty_amount']:,.0f}.",
-                "time": loan.get("due_date", ""),
-                "read": False,
-                "priority": "critical",
-                "loan_id": loan["id"],
-            })
+    user = db.scalar(select(User).where(User.id == request.user_id))
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
 
-    # Sort: critical first, then high, then medium
-    priority_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
-    notifications.sort(key=lambda n: priority_order.get(n["priority"], 99))
+    existing = db.scalar(
+        select(UserBranch).where(
+            UserBranch.branch_id == branch_id,
+            UserBranch.user_id == request.user_id,
+        )
+    )
+    if existing:
+        raise HTTPException(status_code=409, detail="User already assigned to this branch.")
 
-    return {
-        "notifications": notifications,
-        "unread_count": len([n for n in notifications if not n["read"]]),
-        "total": len(notifications),
-    }
+    ub = UserBranch(branch_id=branch_id, user_id=request.user_id)
+    db.add(ub)
+    db.commit()
+    return {"status": "ok", "message": f"{user.full_name} assigned to {branch.name}"}
+
+
+@router.delete("/branches/{branch_id}/users/{user_id}", status_code=status.HTTP_200_OK)
+def remove_user_from_branch(
+    branch_id: UUID,
+    user_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_permission(current_user, "branches.manage")
+    ub = db.scalar(
+        select(UserBranch).where(
+            UserBranch.branch_id == branch_id,
+            UserBranch.user_id == user_id,
+        )
+    )
+    if not ub:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    db.delete(ub)
+    db.commit()
+    return {"status": "ok", "message": "User removed from branch"}

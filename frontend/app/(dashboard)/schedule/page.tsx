@@ -42,14 +42,14 @@ const STATUS_DOT: Record<string, string> = {
 };
 
 function getEventColor(ev: InstallmentEvent): string {
-  if (ev.status === "paid") return STATUS_DOT.paid;
+  if (ev.status.toLowerCase() === "paid") return STATUS_DOT.paid;
   if (ev.is_today) return STATUS_DOT.today;
   if (ev.is_overdue) return STATUS_DOT.overdue;
   return STATUS_DOT.pending;
 }
 
 function getEventBg(ev: InstallmentEvent): string {
-  if (ev.status === "paid") return "bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300";
+  if (ev.status.toLowerCase() === "paid") return "bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300";
   if (ev.is_today) return "bg-orange-50 dark:bg-orange-950/20 border-orange-200 dark:border-orange-800 text-orange-700 dark:text-orange-300";
   if (ev.is_overdue) return "bg-rose-50 dark:bg-rose-950/20 border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300";
   return "bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800 text-[#0D44A2] dark:text-blue-300";
@@ -69,7 +69,7 @@ function DayCell({
 }) {
   const iso = toISO(year, month, day);
   const overdueCount = events.filter(e => e.is_overdue).length;
-  const paidCount = events.filter(e => e.status === "paid").length;
+  const paidCount = events.filter(e => e.status.toLowerCase() === "paid").length;
   const pendingCount = events.filter(e => !e.is_overdue && e.status !== "paid").length;
   const hasEvents = events.length > 0;
 
@@ -169,12 +169,12 @@ function DayPanel({ dateIso, events }: { dateIso: string; events: InstallmentEve
               <div className="text-right shrink-0">
                 <p className="font-black">KES {ev.amount.toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
                 <span className={`text-[9px] font-black uppercase tracking-wide px-1.5 py-0.5 rounded-md ${
-                  ev.status === "paid" ? "bg-emerald-100 text-emerald-700" :
+                  ev.status.toLowerCase() === "paid" ? "bg-emerald-100 text-emerald-700" :
                   ev.is_overdue ? "bg-rose-100 text-rose-700" :
                   ev.is_today ? "bg-orange-100 text-orange-700" :
                   "bg-blue-100 text-blue-700"
                 }`}>
-                  {ev.status === "paid" ? "Paid" : ev.is_overdue ? `${ev.days_overdue}d overdue` : ev.is_today ? "Due Today" : "Pending"}
+                  {ev.status.toLowerCase() === "paid" ? "Paid" : ev.is_overdue ? `${ev.days_overdue}d overdue` : ev.is_today ? "Due Today" : "Pending"}
                 </span>
               </div>
             </div>
@@ -318,7 +318,7 @@ export default function SchedulePage() {
         <div className="bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800 p-3.5 rounded-[18px] shadow-sm">
           <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Paid This Month</p>
           <p className="text-xl font-black text-emerald-600 mt-1">
-            {monthEvents.filter(e => e.status === "paid").length}
+            {monthEvents.filter(e => e.status.toLowerCase() === "paid").length}
           </p>
           <p className="text-[10px] text-zinc-400">installments confirmed</p>
         </div>

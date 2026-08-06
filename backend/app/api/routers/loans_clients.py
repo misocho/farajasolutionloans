@@ -48,6 +48,20 @@ def _require_permission(user: User, perm: str) -> None:
         raise HTTPException(status_code=403, detail=f"Permission '{perm}' required.")
 
 
+def _get_user_branch_ids(user: User) -> list | None:
+    """
+    Returns None for Directors and System Admins (unrestricted access).
+    Returns a list of branch UUIDs for Loan Officers and Managers.
+    An empty list means no branch assigned — they will see nothing (safer than seeing all).
+    """
+    UNRESTRICTED_ROLES = {"Director", "System Admin", "Auditor"}
+    role_names = {ur.role.name for ur in user.roles}
+    if role_names & UNRESTRICTED_ROLES:
+        return None  # No filter — sees everything
+    # Scoped roles: return their assigned branch IDs
+    return [ub.branch_id for ub in user.branches]
+
+
 def _enrich_loan(loan: Loan, db: Session) -> dict:
     outstanding = loan_service.get_outstanding(db, loan)
     computed_status = loan_service.get_computed_loan_status(loan, outstanding)
@@ -216,9 +230,16 @@ def get_clients(
     current_user: User = Depends(get_current_user),
 ):
     _require_permission(current_user, "clients.view")
+    branch_ids = _get_user_branch_ids(current_user)
     stmt = select(Client).order_by(Client.client_number.desc())
     if search:
         stmt = stmt.where(Client.name.ilike(f"%{search}%"))
+    # Branch scoping: LOs and Managers see only their branch
+    if branch_ids is not None:
+        if branch_ids:
+            stmt = stmt.where(Client.branch_id.in_(branch_ids))
+        else:
+            stmt = stmt.where(False)  # No branch assigned → see nothing
     clients = db.scalars(stmt).all()
     return [_serialize_client(c) for c in clients]
 
@@ -372,6 +393,7 @@ def get_loans(
     current_user: User = Depends(get_current_user),
 ):
     _require_permission(current_user, "loans.view")
+    branch_ids = _get_user_branch_ids(current_user)
     stmt = (
         select(Loan)
         .options(
@@ -386,8 +408,15 @@ def get_loans(
     )
     if client_id:
         stmt = stmt.where(Loan.client_id == client_id)
+    # Explicit branch filter from query param (Directors use this to drill into a branch)
     if branch_id:
         stmt = stmt.where(Loan.branch_id == branch_id)
+    # Branch scoping: LOs and Managers see only their branch
+    elif branch_ids is not None:
+        if branch_ids:
+            stmt = stmt.where(Loan.branch_id.in_(branch_ids))
+        else:
+            stmt = stmt.where(False)
 
     loans = db.scalars(stmt).unique().all()
     enriched = [_enrich_loan(loan, db) for loan in loans]
@@ -452,7 +481,7 @@ def get_installments_calendar(
     events = []
     for i in rows:
         due = i.due_date if isinstance(i.due_date, date_type) else i.due_date.date()
-        is_overdue = due < today and i.status.value != "paid"
+        is_overdue = due < today and i.status.value.lower() != "paid"
         events.append({
             "id": str(i.id),
             "loan_id": str(i.loan_id),
@@ -615,6 +644,7 @@ def get_repayments(
     current_user: User = Depends(get_current_user),
 ):
     _require_permission(current_user, "repayments.view")
+    branch_ids = _get_user_branch_ids(current_user)
     stmt = (
         select(Repayment)
         .options(
@@ -629,6 +659,14 @@ def get_repayments(
         stmt = stmt.where(Repayment.loan_id == loan_id)
     if verified is not None:
         stmt = stmt.where(Repayment.verified == verified)
+    # Branch scoping via the loan's branch
+    if branch_ids is not None:
+        if branch_ids:
+            stmt = stmt.join(Loan, Repayment.loan_id == Loan.id).where(
+                Loan.branch_id.in_(branch_ids)
+            )
+        else:
+            stmt = stmt.where(False)
 
     repayments = db.scalars(stmt).unique().all()
     return [_serialize_repayment(r) for r in repayments]
