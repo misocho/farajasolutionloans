@@ -790,6 +790,9 @@ def get_dashboard_stats(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    _require_permission(db, current_user, "dashboard.view")
+
+    # ── Headline counts ──
     total_clients = db.scalar(select(func.count()).select_from(Client)) or 0
     total_loans = db.scalar(select(func.count()).select_from(Loan)) or 0
     active_loans = db.scalar(select(func.count()).select_from(Loan).where(Loan.status == LoanStatus.DISBURSED)) or 0
@@ -811,6 +814,157 @@ def get_dashboard_stats(
         select(func.coalesce(func.sum(FeePayment.amount), 0)).where(FeePayment.verified == True)
     ) or Decimal("0")
 
+    # ── Monthly series (last 6 months, including current) ──
+    now = datetime.now(timezone.utc)
+    cur_idx = now.year * 12 + (now.month - 1)
+    months = [f"{idx // 12:04d}-{idx % 12 + 1:02d}" for idx in range(cur_idx - 5, cur_idx + 1)]
+    series_start = datetime.strptime(months[0] + "-01", "%Y-%m-%d")
+
+    def _month_map(column, amount_column, stmt_extra, start) -> dict:
+        month_expr = func.to_char(column, "YYYY-MM")
+        rows = db.execute(
+            select(month_expr, func.coalesce(func.sum(amount_column), 0))
+            .where(stmt_extra, column >= start)
+            .group_by(month_expr)
+        ).all()
+        return {m: float(v) for m, v in rows}
+
+    disbursed_rows = _month_map(
+        Loan.disbursed_date,
+        Loan.amount,
+        Loan.status.in_([LoanStatus.DISBURSED, LoanStatus.CLOSED]),
+        series_start,
+    )
+    collected_rows = _month_map(
+        Repayment.date,
+        Repayment.amount,
+        Repayment.verified == True,
+        series_start,
+    )
+    fee_rows = _month_map(
+        FeePayment.created_at,
+        FeePayment.amount,
+        FeePayment.verified == True,
+        series_start,
+    )
+
+    monthly_series = [
+        {
+            "month": m,
+            "disbursed": disbursed_rows.get(m, 0),
+            "collected": collected_rows.get(m, 0),
+            "fees": fee_rows.get(m, 0),
+        }
+        for m in months
+    ]
+
+    disbursed_month = disbursed_rows.get(months[-1], 0)
+    collected_month = collected_rows.get(months[-1], 0)
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    prev_month_start = datetime.strptime(months[-2] + "-01", "%Y-%m-%d")
+    clients_month = db.scalar(
+        select(func.count()).select_from(Client).where(Client.created_at >= month_start)
+    ) or 0
+    clients_prev_month = db.scalar(
+        select(func.count())
+        .select_from(Client)
+        .where(Client.created_at >= prev_month_start, Client.created_at < month_start)
+    ) or 0
+
+    def _pct(cur: float, prev: float) -> float | None:
+        if prev <= 0:
+            return None
+        return round((cur - prev) / prev * 100, 1)
+
+    changes = {
+        "clients": _pct(clients_month, clients_prev_month),
+        "disbursed": _pct(disbursed_month, disbursed_rows.get(months[-2], 0)),
+        "collected": _pct(collected_month, collected_rows.get(months[-2], 0)),
+    }
+
+    # ── Portfolio quality (disbursed loans, schedule-aware) ──
+    loans = db.scalars(select(Loan).where(Loan.status == LoanStatus.DISBURSED)).all()
+    repaid_map = {
+        loan_id: float(amount)
+        for loan_id, amount in db.execute(
+            select(Repayment.loan_id, func.coalesce(func.sum(Repayment.amount), 0))
+            .where(Repayment.verified == True)
+            .group_by(Repayment.loan_id)
+        ).all()
+    }
+
+    arrears_count = 0
+    arrears_amount = 0.0
+    overdue_count = 0
+    portfolio_outstanding = 0.0
+    for loan in loans:
+        outstanding = max(float(loan.total_repayable) - repaid_map.get(loan.id, 0.0), 0.0)
+        portfolio_outstanding += outstanding
+        status = loan_service.get_computed_loan_status(loan, Decimal(str(outstanding)))
+        if status in ("Arrears", "Past Maturity", "Defaulter"):
+            arrears_count += 1
+            arrears_amount += outstanding
+        if status in ("Past Maturity", "Defaulter"):
+            overdue_count += 1
+
+    # ── Recent activity feed (latest 8 across modules) ──
+    recent_repayments = db.execute(
+        select(Repayment, Loan.loan_number, Client.name)
+        .join(Loan, Repayment.loan_id == Loan.id)
+        .join(Client, Repayment.client_id == Client.id)
+        .order_by(Repayment.date.desc())
+        .limit(8)
+    ).all()
+    recent_loans = db.execute(
+        select(Loan, Client.name)
+        .join(Client, Loan.client_id == Client.id)
+        .where(Loan.date_submitted.isnot(None))
+        .order_by(Loan.date_submitted.desc())
+        .limit(8)
+    ).all()
+    recent_clients = db.scalars(
+        select(Client).order_by(Client.created_at.desc()).limit(8)
+    ).all()
+    recent_fees = db.execute(
+        select(FeePayment, Client.name)
+        .join(Client, FeePayment.client_id == Client.id)
+        .order_by(FeePayment.created_at.desc())
+        .limit(8)
+    ).all()
+
+    events: list[dict] = []
+    for r, loan_number, client_name in recent_repayments:
+        events.append({
+            "type": "repayment",
+            "title": f"Payment of KES {float(r.amount):,.0f} recorded",
+            "description": f"{client_name} · {loan_number} — {'verified' if r.verified else 'pending verification'}",
+            "time": r.date.isoformat(),
+        })
+    for loan, client_name in recent_loans:
+        events.append({
+            "type": "loan",
+            "title": f"Loan application {loan.loan_number}",
+            "description": f"{client_name} · KES {float(loan.amount):,.0f}",
+            "time": loan.date_submitted.isoformat(),
+        })
+    for client in recent_clients:
+        events.append({
+            "type": "client",
+            "title": "New client registered",
+            "description": client.name,
+            "time": client.created_at.isoformat(),
+        })
+    for fee, client_name in recent_fees:
+        events.append({
+            "type": "fee",
+            "title": f"Application fee KES {float(fee.amount):,.0f}",
+            "description": f"{client_name} — {'verified' if fee.verified else 'pending verification'}",
+            "time": fee.created_at.isoformat(),
+        })
+
+    events.sort(key=lambda e: e["time"], reverse=True)
+    recent_activity = events[:8]
+
     return {
         "total_clients": total_clients,
         "total_loans": total_loans,
@@ -820,4 +974,16 @@ def get_dashboard_stats(
         "total_collected": float(total_collected),
         "unverified_repayments": unverified_repayments,
         "fee_income": float(fee_income),
+        "portfolio_outstanding": portfolio_outstanding,
+        "disbursed_month": disbursed_month,
+        "collected_month": collected_month,
+        "clients_month": clients_month,
+        "quality": {
+            "arrears_count": arrears_count,
+            "arrears_amount": arrears_amount,
+            "overdue_count": overdue_count,
+        },
+        "changes": changes,
+        "monthly_series": monthly_series,
+        "recent_activity": recent_activity,
     }

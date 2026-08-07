@@ -275,6 +275,39 @@ export async function verifyRepaymentApi(id: string, verified_by: string): Promi
   return res.data;
 }
 
+// ── Dashboard Stats API ───────────────────────────────────────────────────────
+
+export interface DashboardActivity {
+  type: "repayment" | "loan" | "client" | "fee";
+  title: string;
+  description: string;
+  time: string;
+}
+
+export interface DashboardStats {
+  total_clients: number;
+  total_loans: number;
+  active_loans: number;
+  pending_loans: number;
+  total_disbursed: number;
+  total_collected: number;
+  unverified_repayments: number;
+  fee_income: number;
+  portfolio_outstanding: number;
+  disbursed_month: number;
+  collected_month: number;
+  clients_month: number;
+  quality: { arrears_count: number; arrears_amount: number; overdue_count: number };
+  changes: { clients: number | null; disbursed: number | null; collected: number | null };
+  monthly_series: { month: string; disbursed: number; collected: number; fees: number }[];
+  recent_activity: DashboardActivity[];
+}
+
+export async function fetchDashboardStatsApi(): Promise<DashboardStats> {
+  const res = await api.get<DashboardStats>("/dashboard/stats");
+  return res.data;
+}
+
 // ── Report API ───────────────────────────────────────────────────────────────
 
 export async function fetchPortfolioReportApi() {

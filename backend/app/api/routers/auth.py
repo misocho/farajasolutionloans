@@ -55,6 +55,7 @@ def me(
     current_user=Depends(get_current_user),
 ):
     role_names = [ur.role.name for ur in current_user.roles]
+    branch_names = [ub.branch.name for ub in current_user.branches]
     return AuthUser(
         id=current_user.id,
         employee_number=current_user.employee_number,
@@ -66,6 +67,7 @@ def me(
         role=role_names[0] if role_names else None,
         roles=role_names,
         permissions=sorted(get_user_permissions(db, current_user)),
+        branches=branch_names,
     )
 
 

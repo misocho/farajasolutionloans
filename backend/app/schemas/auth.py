@@ -29,3 +29,4 @@ class AuthUser(BaseModel):
     role: str | None = None
     roles: list[str] = []
     permissions: list[str] = []
+    branches: list[str] = []

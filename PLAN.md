@@ -21,6 +21,7 @@
 | Application fee tiers | 4–10k: **800 new / 600 existing** · >10k: **1500 new / 1000 existing** (existing = ≥1 disbursed/closed loan); non-refundable, NOT part of loan schedule; **minimum loan = KES 4,000** |
 | Fee permissions | **Dedicated** `fees.view` / `fees.record` / `fees.verify` (2026-08-07); recorder may verify own record (cash at desk) |
 | Estimated asset value | **Client-level business field** `clients.estimated_asset_value` (2026-08-07) |
+| Dashboard scope | **P7 2026-08-07** — rebuild to real data, zero placeholders; inline quick modals removed (they duplicated pages with incomplete forms); Quick Actions navigate to the real pages; trend + quality stats come from an extended `/dashboard/stats`; real audit trail (`audit_logs`) deferred to P7-C |
 
 ---
 
@@ -296,6 +297,28 @@ Director sends invite (Name + Email + Role + Branch)
 - [x] Signature pads (react-signature-canvas) — applicant + guarantor, in client registration
 - [x] Photo uploads (4: applicant/guarantor × ID/passport) — base64 to DB
 - [ ] **"Download Form PDF"** button on client detail — ❌ missing
+
+---
+
+## PRIORITY 7 — Dashboard Rebuild (Real Data, No Placeholders)
+> **Status:** `[x]` A+B implemented 2026-08-07 — backend `/dashboard/stats` extended (guard + monthly series + portfolio quality + MoM changes + recent activity, verified via TestClient with real data) and the dashboard page fully rewired to real data (no fallbacks, no demo chart/feed). C (audit trail) still open.
+
+### P7-A — Kill placeholder data (high priority — doing first)
+- [x] Wire existing `GET /dashboard/stats` via new `fetchDashboardStatsApi()` — cards: Active Portfolio, Active Clients, Disbursed (Month), Repayments (Month)
+- [x] Remove ALL fake fallbacks + `extraRepayments` demo state + hardcoded MoM % (show real counts/amounts; MoM only where computed)
+- [x] Replace fake chart with real 6-month series (disbursed vs verified repayments)
+- [x] Replace fake activity feed with real recent events (repayments / loans / clients / fees)
+- [x] Loan table: `loan_number` instead of `id`, `formatKES`, `formatDate`
+- [x] Branch chip: add branch names to `/auth/me`; delete the fake branch fallback
+- [x] Remove inline quick modals (incomplete duplicates of the real pages; loan modal also fails without a verified application fee) — Quick Actions navigate to `/loans`, `/clients`, `/repayments`, `/reports`
+
+### P7-B — Real stats & trends backend (high priority — after A)
+- [x] Extend `/dashboard/stats` (missing `dashboard.view` guard — flagged in Cross-Cutting): 6-month monthly series (disbursed, verified repayments, fee income), portfolio quality (arrears count + amount, overdue count, unverified repayments), MoM deltas for the 4 stat cards, recent-activity feed (latest 8 events across repayments/loans/clients/fees)
+- [x] Frontend consumes the extended endpoint — no client-side math over list data
+
+### P7-C — Real audit trail (deferred — the honest long-term feed for "Recent Activities")
+- [ ] `audit_logs` table (`actor`, `action`, `entity`, `entity_id`, `meta`, `created_at`) + event writes on loan approve/disburse/close, repayment record/verify, fee record/verify, client create
+- [ ] `GET /audit-logs` (guarded by `audit.view`) + **Audit Logs page** — replaces the dead "View Full Audit Logs" button
 
 ---
 

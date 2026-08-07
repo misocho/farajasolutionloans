@@ -7,8 +7,8 @@ import { cn } from "@/lib/utils";
 interface StatCardProps {
   title: string;
   value: string;
-  change: string;
-  isPositive: boolean;
+  change?: string;
+  isPositive?: boolean;
   icon: LucideIcon;
   iconBgColor: string;
   iconColor: string;
@@ -41,26 +41,28 @@ export function StatCard({
       </div>
 
       {/* Bottom trend info */}
-      <div className="flex items-center gap-1 sm:gap-1.5 border-t border-zinc-100 dark:border-zinc-850 pt-2 sm:pt-3">
-        <span
-          className={cn(
-            "flex items-center text-[10px] sm:text-xs font-bold px-1 sm:px-1.5 py-0.5 rounded-lg",
-            isPositive
-              ? "bg-emerald-500/10 text-emerald-600"
-              : "bg-red-500/10 text-red-600"
-          )}
-        >
-          {isPositive ? (
-            <ArrowUpRight className="size-3 sm:size-3.5 mr-0.5" />
-          ) : (
-            <ArrowDownRight className="size-3 sm:size-3.5 mr-0.5" />
-          )}
-          {change}
-        </span>
-        <span className="text-[9px] sm:text-[11px] text-zinc-400 dark:text-zinc-500">
-          vs last month
-        </span>
-      </div>
+      {change && (
+        <div className="flex items-center gap-1 sm:gap-1.5 border-t border-zinc-100 dark:border-zinc-850 pt-2 sm:pt-3">
+          <span
+            className={cn(
+              "flex items-center text-[10px] sm:text-xs font-bold px-1 sm:px-1.5 py-0.5 rounded-lg",
+              isPositive
+                ? "bg-emerald-500/10 text-emerald-600"
+                : "bg-red-500/10 text-red-600"
+            )}
+          >
+            {isPositive ? (
+              <ArrowUpRight className="size-3 sm:size-3.5 mr-0.5" />
+            ) : (
+              <ArrowDownRight className="size-3 sm:size-3.5 mr-0.5" />
+            )}
+            {change}
+          </span>
+          <span className="text-[9px] sm:text-[11px] text-zinc-400 dark:text-zinc-500">
+            vs last month
+          </span>
+        </div>
+      )}
     </div>
   );
 }
