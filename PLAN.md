@@ -36,7 +36,7 @@
 | 2 | Permission name mismatch: checks `repayments.create` but seeded permission is `repayments.record` | ✅ **FIXED 2026-08-07** → `repayments.record` | `backend/app/api/routers/loans_clients.py:681` |
 | 3 | Entire admin route block duplicated (lines 51–267 copied at 270–422) | ✅ **FIXED 2026-08-07** — duplicate block deleted (422 → 269 lines) | `backend/app/api/routers/admin.py` |
 | 4 | Duplicate `GET /branches`: unchecked version in `loans_clients.py` registered first, shadows permission-checked one in `branches.py` | ✅ **FIXED 2026-08-07** — removed; guarded version (with stats) now serves; OpenAPI shows 1 definition | `backend/app/api/routers/loans_clients.py` |
-| 5 | `.env` (real Resend API key + `SECRET_KEY`) committed to git | ✅ **DECISION 2026-08-07** — committed by design (single team repo); `.gitignore` updated to allow it; treat as sensitive, rotate if leaked | `backend/.env` |
+| 5 | `.env` (real Resend API key + `SECRET_KEY`) committed to git | ⚠️ **DECISION REVERSED 2026-08-07** — push protection blocked the key; `.env` purged from history and gitignored; **rotate Resend key + SECRET_KEY**; copy `.env.example` | `backend/.env` |
 | 6 | Notification read-state is an in-memory dict (resets on restart); frontend mark-read is local state, `PATCH /notifications/read-all` not called | Read state lost on restart | `backend/app/api/routers/notifications.py:35` |
 | 7 | Lumpsum interest rate placeholder `0.20` marked TBD | Wrong pricing | `backend/app/db/seed.py:301` |
 | 8 | Backend root `main.py` is a "Hello from backend!" stub; real entry is `app/main.py`; `health.py` router never registered | Confusion, no /health | `backend/main.py`, `backend/app/api/router.py` |
@@ -314,7 +314,7 @@ Director sends invite (Name + Email + Role + Branch)
 | Seed script updated for new models (loan_products, demo clients/loans) | P2 | `[x]` 3 products seeded; demo clients/loans — ⚠️ verify |
 | `repayments.verify` permission | P2 | `[x]` Confirmed — verify uses `repayments.verify` |
 | Duplicated admin route block (`admin.py:51–267` vs `270–422`) | P1 | `[ ]` Cleanup |
-| `.env` committed with real keys | Security | `[x]` Decision 2026-08-07: committed by design; `.gitignore` unignored; rotate if leaked |
+| `.env` committed with real keys | Security | `[x]` Decision reversed 2026-08-07: purged from history + gitignored (push protection); rotate Resend key + `SECRET_KEY` |
 | Backend root `main.py` stub + unregistered `/health` router | — | `[ ]` Cleanup |
 | Tests | — | `[ ]` No test dirs anywhere (backend or frontend) |
 

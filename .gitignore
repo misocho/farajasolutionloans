@@ -9,8 +9,10 @@ venv/
 env/
 
 # Environment variables
-# NOTE: backend/.env IS committed by design (team repo, see AGENTS.md).
-# Only local/dev variants are ignored.
+# NOTE: backend/.env is NEVER committed — GitHub push protection blocks
+# any commit containing the real Resend key (decision reversed 2026-08-07).
+# Copy .env.example to backend/.env locally.
+.env
 .env.local
 .env.*.local
 !.env.example

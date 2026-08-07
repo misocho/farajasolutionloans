@@ -42,7 +42,7 @@ Backend of the Faraja Solution Loans microfinance system. Read the root `../AGEN
 
 ## Boundaries
 
-- `backend/.env` holds live keys and IS committed by design (2026-08-07 decision) — never log secrets, rotate if leaked, placeholders only in `.env.example`.
+- `backend/.env` holds live keys and is **gitignored** — never commit it (GitHub push protection blocks pushes containing the Resend key; earlier "committed by design" decision reversed 2026-08-07), never log secrets, rotate if leaked, placeholders only in `.env.example`.
 - `uv.lock` / `pyproject.toml` — no dependency changes without approval.
 - `alembic/versions/*` — immutable once applied; new revisions only.
 - Seeded data definitions (`app/core/branches.py`, `app/core/permissions.py`, `app/db/seed.py`, `app/db/seed_data.py`) — never rewrite without flagging that reseeding is needed.

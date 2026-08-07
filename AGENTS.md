@@ -104,7 +104,7 @@ Use these exact strings. Known historical violations (do not reintroduce): `clie
 
 1. ✅ **Fixed 2026-08-07** — permission mismatches `clients.edit`→`clients.update`, `repayments.create`→`repayments.record` (`loans_clients.py:288`, `:681`). Do not reintroduce.
 2. ✅ **Fixed 2026-08-07** — duplicated admin route block deleted (`admin.py`); duplicate unguarded `GET /branches` removed from `loans_clients.py` (guarded branches.py version now serves).
-3. ✅ **Decision 2026-08-07** — `backend/.env` (real Resend key + SECRET_KEY) is **committed by design** (single team repo). Treat it as sensitive: never log secrets, rotate keys if leaked, never add secrets to any other file.
+3. ⚠️ **Decision reversed 2026-08-07** — `backend/.env` was committed by design, but GitHub push protection blocks any push containing the real Resend key, so it is now **gitignored** (history purged). Copy `.env.example` to `backend/.env` locally. Treat the exposed keys as compromised: **rotate the Resend API key and SECRET_KEY**, never add secrets to any other file.
 4. ✅ **Fixed 2026-08-07** — permission resolution `ur.role.permissions` raised `AttributeError` (Role has no `permissions` relationship) → 500 on every permission-checked endpoint for authenticated users (notifications, loans, clients, repayments, reports, branches). All routers now use `get_user_permissions(db, user)` from `app/core/permissions.py`; `_require_permission` signature is `(db, user, perm)`.
 5. ✅ **Fixed 2026-08-07** — notification read-state now DB-backed (`notification_reads` + `PATCH /notifications/{id}/read`); `5df95998dc2f` added `PENDING_APPROVAL` to the userstatus enum (invitees could not be inserted); `RESEND_FROM_EMAIL` override in `.env` (key is domain-restricted to `faraja.enkaai.net`).
 6. Missing (planned): `POST /auth/complete-profile`, financial report, APScheduler email jobs, PDF service, change-password wiring.
@@ -113,7 +113,7 @@ Use these exact strings. Known historical violations (do not reintroduce): `clie
 
 ## Boundaries — do not touch without asking
 
-- `backend/.env` (secrets), `frontend/.env.local`, `node_modules/`, `.next/`, `.venv/`, `uv.lock`/`pnpm-lock.yaml` (no dependency changes without approval), `alembic/versions/*` (migrations are immutable once applied — new revisions only), `PLAN.md` status sections (update only as part of a plan-update task).
+- `backend/.env` (secrets — gitignored, never commit), `frontend/.env.local`, `node_modules/`, `.next/`, `.venv/`, `uv.lock`/`pnpm-lock.yaml` (no dependency changes without approval), `alembic/versions/*` (migrations are immutable once applied — new revisions only), `PLAN.md` status sections (update only as part of a plan-update task).
 - Never commit anything (no `git commit`/`git push` unless explicitly asked).
 - Never delete or rewrite seeded data definitions (`app/core/branches.py`, `app/core/permissions.py`, `app/db/seed.py`) without flagging that DB reseeding will be needed.
 
