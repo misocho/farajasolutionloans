@@ -131,7 +131,8 @@ def validate_token(db: Session, token: str) -> UserInvite:
 def accept_invite(db: Session, token: str, password: str) -> User:
     """
     Accept an invite: create the User with PENDING_APPROVAL status,
-    assign role and branch, mark invite as accepted.
+    assign role and branch. The invite stays PENDING until the user
+    completes their profile (see complete_profile).
     """
     invite = validate_token(db, token)
 
@@ -140,6 +141,11 @@ def accept_invite(db: Session, token: str, password: str) -> User:
         select(User).where(User.email == invite.email.strip().lower())
     )
     if existing_user:
+        # Idempotent re-submit after a partial setup (password step done,
+        # profile step pending) — the invite is still PENDING, so return
+        # the existing user instead of erroring.
+        if invite.status == InviteStatus.PENDING:
+            return existing_user
         raise InviteError("An account with this email already exists.")
 
     employee_number = _next_employee_number(db, invite.role_name)
@@ -166,7 +172,31 @@ def accept_invite(db: Session, token: str, password: str) -> User:
         if branch:
             db.add(UserBranch(user_id=user.id, branch_id=branch.id))
 
-    # Mark invite accepted
+    return user
+
+
+def complete_profile(
+    db: Session,
+    token: str,
+    phone: str,
+    id_no: str,
+    photo: str | None = None,
+) -> User:
+    """Save the invited user's profile (phone/ID/photo) and mark the invite accepted."""
+    invite = validate_token(db, token)
+
+    user = db.scalar(
+        select(User).where(User.email == invite.email.strip().lower())
+    )
+    if not user:
+        raise InviteError("Complete the password step before saving your profile.")
+
+    user.phone = phone
+    user.id_no = id_no
+    user.profile_photo = photo
+    db.flush()
+
+    # Profile complete — the invite is fully consumed now
     invite.status = InviteStatus.ACCEPTED
     invite.accepted_at = datetime.now(timezone.utc)
     db.flush()

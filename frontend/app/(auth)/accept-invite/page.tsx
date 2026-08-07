@@ -1,15 +1,94 @@
 "use client";
 
-import { useState, Suspense } from "react";
+import { useState, useRef, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation } from "@tanstack/react-query";
-import { Eye, EyeOff, KeyRound, CheckCircle, Loader2, ShieldCheck } from "lucide-react";
+import { Eye, EyeOff, KeyRound, CheckCircle, Loader2, ShieldCheck, Camera, FileText, Phone } from "lucide-react";
 import { toast } from "sonner";
-import { acceptInviteApi } from "@/features/auth/api";
+import { acceptInviteApi, completeProfileApi } from "@/features/auth/api";
 import { AppLogo } from "@/components/layout/app-logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+
+type ApiError = { response?: { data?: { detail?: string } } };
+
+function ProfilePhotoPicker({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (base64: string) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error("Photo must be under 10MB");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => onChange(reader.result as string);
+    reader.readAsDataURL(file);
+  };
+
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+        Profile Photo <span className="text-zinc-400 font-semibold">(optional)</span>
+      </Label>
+      <div
+        onClick={() => inputRef.current?.click()}
+        className={`relative flex flex-col items-center justify-center gap-2 border-2 border-dashed rounded-2xl cursor-pointer transition-colors min-h-[120px] overflow-hidden ${
+          value
+            ? "border-emerald-400/50 bg-emerald-50/20 dark:border-emerald-700/40 dark:bg-emerald-950/10"
+            : "border-zinc-200 hover:border-[#0D44A2]/50 bg-zinc-50/50 dark:border-zinc-800 dark:hover:border-[#0D44A2]/40"
+        }`}
+      >
+        {value ? (
+          <>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={value}
+              alt="Profile"
+              className="w-full h-full object-cover absolute inset-0"
+            />
+            <div className="absolute inset-0 bg-zinc-950/30 flex flex-col items-center justify-center gap-1 opacity-0 hover:opacity-100 transition-opacity">
+              <Camera className="size-6 text-white" />
+              <span className="text-[10px] text-white font-semibold">
+                Tap to change
+              </span>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="p-3 bg-zinc-100 dark:bg-zinc-800 rounded-xl">
+              <Camera className="size-6 text-zinc-500 dark:text-zinc-400" />
+            </div>
+            <div className="text-center px-3">
+              <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                Tap to take a selfie
+              </p>
+              <p className="text-[10px] text-zinc-400 mt-0.5">
+                or choose from gallery
+              </p>
+            </div>
+          </>
+        )}
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/*"
+          capture="user"
+          className="hidden"
+          onChange={handleFile}
+        />
+      </div>
+    </div>
+  );
+}
 
 function AcceptInviteContent() {
   const router = useRouter();
@@ -20,18 +99,35 @@ function AcceptInviteContent() {
   const [confirm, setConfirm] = useState("");
   const [showPass, setShowPass] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
-  const [done, setDone] = useState(false);
+  const [step, setStep] = useState<"password" | "profile" | "done">("password");
   const [employeeNumber, setEmployeeNumber] = useState("");
+  const [phone, setPhone] = useState("");
+  const [idNo, setIdNo] = useState("");
+  const [photo, setPhoto] = useState("");
 
   const mutation = useMutation({
     mutationFn: () => acceptInviteApi({ token, password }),
     onSuccess: (data) => {
       setEmployeeNumber(data.employee_number);
-      setDone(true);
+      setStep("profile");
     },
-    onError: (err: any) => {
+    onError: (err: ApiError) => {
       toast.error("Could not accept invite", {
         description: err?.response?.data?.detail ?? "The link may have expired.",
+      });
+    },
+  });
+
+  const profileMutation = useMutation({
+    mutationFn: () =>
+      completeProfileApi({ token, phone: phone.trim(), id_no: idNo.trim(), photo: photo || undefined }),
+    onSuccess: (data) => {
+      setEmployeeNumber(data.employee_number);
+      setStep("done");
+    },
+    onError: (err: ApiError) => {
+      toast.error("Could not save your profile", {
+        description: err?.response?.data?.detail ?? "Please try again.",
       });
     },
   });
@@ -51,6 +147,23 @@ function AcceptInviteContent() {
       return;
     }
     mutation.mutate();
+  };
+
+  const handleProfileSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!phone.trim()) {
+      toast.error("Phone number is required.");
+      return;
+    }
+    if (phone.replace(/\D/g, "").length < 9) {
+      toast.error("Enter a valid phone number.");
+      return;
+    }
+    if (!idNo.trim()) {
+      toast.error("National ID number is required.");
+      return;
+    }
+    profileMutation.mutate();
   };
 
   if (!token) {
@@ -76,18 +189,24 @@ function AcceptInviteContent() {
             <AppLogo size="md" />
             <div className="mt-8 sm:mt-10">
               <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-zinc-900 dark:text-zinc-50">
-                {done ? "Account Created!" : "Accept Your Invitation"}
+                {step === "done"
+                  ? "Account Created!"
+                  : step === "profile"
+                    ? "Complete Your Profile"
+                    : "Accept Your Invitation"}
               </h2>
               <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
-                {done
+                {step === "done"
                   ? "Your account is pending Director approval. You'll receive an email once activated."
-                  : "Set a secure password to activate your Faraja Solution Loans account."}
+                  : step === "profile"
+                    ? "Add your phone number and ID so the Director can verify you."
+                    : "Set a secure password to activate your Faraja Solution Loans account."}
               </p>
             </div>
           </div>
 
           <div className="mt-8 flex-1 flex flex-col justify-center">
-            {done ? (
+            {step === "done" ? (
               <div className="flex flex-col items-center gap-5 py-8 text-center">
                 <div className="p-5 bg-emerald-500/10 rounded-3xl">
                   <CheckCircle className="size-12 text-emerald-500" />
@@ -104,6 +223,57 @@ function AcceptInviteContent() {
                   Back to Login
                 </Button>
               </div>
+            ) : step === "profile" ? (
+              <form onSubmit={handleProfileSubmit} className="space-y-5">
+                <div className="space-y-1.5">
+                  <Label htmlFor="phone" className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                    Cell Phone Number <span className="text-rose-500">*</span>
+                  </Label>
+                  <div className="relative">
+                    <Phone className="absolute left-3.5 top-1/2 -translate-y-1/2 size-4 text-zinc-400" />
+                    <Input
+                      id="phone"
+                      type="tel"
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      placeholder="e.g. +254 712 345 678"
+                      className="pl-10 h-11 rounded-xl border-zinc-200 dark:border-zinc-700"
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="idNo" className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                    National ID Number <span className="text-rose-500">*</span>
+                  </Label>
+                  <div className="relative">
+                    <FileText className="absolute left-3.5 top-1/2 -translate-y-1/2 size-4 text-zinc-400" />
+                    <Input
+                      id="idNo"
+                      value={idNo}
+                      onChange={(e) => setIdNo(e.target.value)}
+                      placeholder="e.g. 29304928"
+                      className="pl-10 h-11 rounded-xl border-zinc-200 dark:border-zinc-700"
+                      required
+                    />
+                  </div>
+                </div>
+
+                <ProfilePhotoPicker value={photo} onChange={setPhoto} />
+
+                <Button
+                  type="submit"
+                  disabled={profileMutation.isPending}
+                  className="w-full bg-[#0D44A2] hover:bg-[#0A3682] text-white rounded-xl h-11 font-semibold flex items-center justify-center gap-2 shadow"
+                >
+                  {profileMutation.isPending ? (
+                    <><Loader2 className="animate-spin size-4" /> Saving Profile...</>
+                  ) : (
+                    <><CheckCircle className="size-4" /> Save Profile & Finish</>
+                  )}
+                </Button>
+              </form>
             ) : (
               <form onSubmit={handleSubmit} className="space-y-5">
                 <div className="space-y-1.5">

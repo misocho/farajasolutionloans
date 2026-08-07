@@ -2,7 +2,7 @@ from datetime import datetime
 from uuid import UUID
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, EmailStr
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from app.models.enums import UserStatus
 from app.models.user_invite import InviteStatus
 from decimal import Decimal
@@ -116,6 +116,18 @@ class AcceptInviteRequest(BaseModel):
 
 
 class AcceptInviteResponse(BaseModel):
+    message: str
+    employee_number: str
+
+
+class CompleteProfileRequest(BaseModel):
+    token: str
+    phone: str = Field(min_length=1)
+    id_no: str = Field(min_length=1)
+    photo: Optional[str] = None
+
+
+class CompleteProfileResponse(BaseModel):
     message: str
     employee_number: str
 

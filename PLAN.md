@@ -46,7 +46,7 @@
 ### Phase C — Core workflow close-out (P1–P3) · ~2 weeks
 
 - [x] C0 Client branch integrity on registration — form sends `branch_id` (dropdown for Director/System Admin, auto-assigned for scoped LO/Manager); backend validates branch exists (400) + enforces user scope on create/update (403); `GET /clients/{id}` and `POST /loans` scope-checked; clients page gate uses real `clients.create` permission
-- [ ] C1 `POST /auth/complete-profile` + accept-invite → profile step (phone/ID/photo) → PENDING_APPROVAL
+- [x] C1 `POST /auth/complete-profile` + accept-invite → profile step (phone/ID/photo) → PENDING_APPROVAL — accept-invite now defers invite acceptance; profile step in accept-invite flow calls complete-profile (new `users.phone/id_no/profile_photo` columns, migration `6f2942b8aaea`); user stays PENDING_APPROVAL until Director approves
 - [ ] C2 Settings change-password wired to `PATCH /auth/change-password` (remove fake setTimeout save)
 - [ ] C3 Client detail drawer → `GET /clients/{id}` (`fetchClientApi` + wire)
 - [ ] C4 Full computed status badges (Almost Due / Due / Arrears / Past Maturity / Defaulter) + per-loan installment timeline

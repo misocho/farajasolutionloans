@@ -21,6 +21,16 @@ export async function acceptInviteApi(data: { token: string; password: string })
   return response.data;
 }
 
+export async function completeProfileApi(data: {
+  token: string;
+  phone: string;
+  id_no: string;
+  photo?: string;
+}): Promise<AcceptInviteResponse> {
+  const response = await api.post<AcceptInviteResponse>("/auth/complete-profile", data);
+  return response.data;
+}
+
 export interface ChangePasswordResponse {
   status: string;
   message: string;

@@ -14,6 +14,8 @@ from app.schemas.users import (
     AcceptInviteRequest,
     AcceptInviteResponse,
     ChangePasswordRequest,
+    CompleteProfileRequest,
+    CompleteProfileResponse,
 )
 from app.services.auth_service import (
     AuthService,
@@ -86,11 +88,43 @@ def accept_invite(
         )
         db.commit()
         return AcceptInviteResponse(
-            message="Account created successfully. Awaiting Director approval before you can log in.",
+            message="Account created successfully. Complete your profile to finish setup.",
             employee_number=user.employee_number,
         )
     except InviteError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+
+@router.post(
+    "/complete-profile",
+    response_model=CompleteProfileResponse,
+    status_code=status.HTTP_200_OK,
+)
+def complete_profile(
+    request: CompleteProfileRequest,
+    db: Session = Depends(get_db),
+):
+    """Save the invited user's profile (phone/ID/photo) and finish invite setup.
+
+    The user stays PENDING_APPROVAL until the Director activates the account.
+    """
+    try:
+        user = invite_service.complete_profile(
+            db=db,
+            token=request.token,
+            phone=request.phone,
+            id_no=request.id_no,
+            photo=request.photo,
+        )
+        db.commit()
+        return CompleteProfileResponse(
+            message="Profile saved. Awaiting Director approval before you can log in.",
+            employee_number=user.employee_number,
+        )
+    except InviteError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
 
 
 @router.patch("/change-password", status_code=status.HTTP_200_OK)

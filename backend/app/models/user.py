@@ -36,6 +36,20 @@ class User(BaseModel):
         nullable=False,
     )
 
+    phone: Mapped[str | None] = mapped_column(
+        String(20),
+        nullable=True,
+    )
+
+    id_no: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+    )
+
+    profile_photo: Mapped[str | None] = mapped_column(
+        nullable=True,  # base64 in dev; S3 in prod
+    )
+
     hashed_password: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
