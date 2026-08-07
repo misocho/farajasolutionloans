@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import {
   Settings,
   User,
@@ -19,12 +19,16 @@ import {
   Info,
 } from "lucide-react";
 import { toast } from "sonner";
-import { fetchMeApi } from "@/features/auth/api";
+import { fetchMeApi, changePasswordApi } from "@/features/auth/api";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 
 type ThemeOption = "light" | "dark" | "system";
+
+type ApiError = {
+  response?: { data?: { detail?: string } };
+};
 
 export default function SettingsPage() {
   const [activeSection, setActiveSection] = useState<string>("profile");
@@ -34,6 +38,19 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
 
   const { data: user } = useQuery({ queryKey: ["me"], queryFn: fetchMeApi });
+
+  const passwordMutation = useMutation({
+    mutationFn: (data: { current_password: string; new_password: string }) => changePasswordApi(data),
+    onSuccess: () => {
+      toast.success("Password updated successfully");
+      setPinForm({ current: "", next: "", confirm: "" });
+    },
+    onError: (err: ApiError) => {
+      toast.error("Could not update password", {
+        description: err?.response?.data?.detail ?? "Please try again.",
+      });
+    },
+  });
 
   const handleSave = (section: string) => {
     setSaving(true);
@@ -153,11 +170,11 @@ export default function SettingsPage() {
                   </div>
                 </div>
                 <Button onClick={() => {
-                  if (!pinForm.current || !pinForm.next) { toast.error("Fill in all fields"); return; }
+                  if (!pinForm.current || !pinForm.next || !pinForm.confirm) { toast.error("Fill in all fields"); return; }
                   if (pinForm.next !== pinForm.confirm) { toast.error("Passwords do not match"); return; }
-                  handleSave("Password");
-                  setPinForm({ current: "", next: "", confirm: "" });
-                }} disabled={saving} className="bg-[#0D44A2] hover:bg-[#0A3682] text-white rounded-xl h-10 text-xs font-bold">
+                  if (pinForm.next.length < 8) { toast.error("New password must be at least 8 characters"); return; }
+                  passwordMutation.mutate({ current_password: pinForm.current, new_password: pinForm.next });
+                }} disabled={passwordMutation.isPending} className="bg-[#0D44A2] hover:bg-[#0A3682] text-white rounded-xl h-10 text-xs font-bold">
                   Update Password
                 </Button>
               </div>
