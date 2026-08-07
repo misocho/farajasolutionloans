@@ -1,0 +1,23 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "lsp": {
+    "typescript": {
+      "command": ["npx", "-y", "typescript-language-server", "--stdio"],
+      "extensions": [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts"]
+    },
+    "pyright": {
+      "command": ["uvx", "--from", "pyright", "pyright-langserver", "--stdio"],
+      "extensions": [".py", ".pyi"]
+    },
+    "ruff": {
+      "command": ["uvx", "ruff", "server"],
+      "extensions": [".py", ".pyi"]
+    },
+    "bash": { "disabled": true },
+    "eslint": { "disabled": true },
+    "deno": { "disabled": true }
+  },
+  "permission": {
+    "lsp": "allow"
+  }
+}
