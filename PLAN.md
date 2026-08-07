@@ -51,7 +51,7 @@
 - [x] U4 Profile photo in avatars — `/auth/me` returns `profile_photo` (AuthUser + UserProfile type); sidebar/user-menu/settings avatars render photo via AvatarImage with initials fallback, styling unchanged
 - [x] U5 Recent activities complete — dashboard stats feed now emits 6 event types: repayments (recorded+verified), loan applications, **approvals**, **disbursements**, clients, fees (was missing approvals/disbursements; repayments were already in the backend but seed dates hid them)
 - [x] U6 Notification preferences matched + persisted — Settings toggles rebuilt to the 6 real types (due_today/due_tomorrow/almost_due/arrears/repayment_pending/pending_approval), DB-backed per user (`notification_prefs` table + GET/PATCH `/notifications/preferences`), bell filtered server-side by prefs (migration `71f36ff96244`)
-- [ ] U7 Settings honesty + token expiry — `backend/.env` `ACCESS_TOKEN_EXPIRE_MINUTES` 30→60 (config default is 60; settings System Info text fixes: JWT 60 min, PostgreSQL live, storage mode); remove fake Appearance section (decorative — no `.dark` ever applied); drop remaining fake setTimeout saves
+- [x] U7 Settings honesty + token expiry — `backend/.env` `ACCESS_TOKEN_EXPIRE_MINUTES` 30→60 (config default, verified 60-min JWTs); System Info fixed (JWT 60 min, PostgreSQL live, storage = database base64 / S3 prod, Next.js 16); fake Appearance section removed (never applied `.dark`); last fake setTimeout save removed (none left)
 
 ### Phase C — Core workflow close-out (P1–P3) · ~2 weeks
 

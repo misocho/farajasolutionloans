@@ -3,18 +3,10 @@
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  Settings,
   User,
   Lock,
   Bell,
-  Globe,
-  Moon,
-  Sun,
-  Monitor,
-  ChevronRight,
   Shield,
-  Building2,
-  Smartphone,
   Check,
   Info,
 } from "lucide-react";
@@ -25,8 +17,6 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 
-type ThemeOption = "light" | "dark" | "system";
-
 type ApiError = {
   response?: { data?: { detail?: string } };
 };
@@ -34,9 +24,7 @@ type ApiError = {
 export default function SettingsPage() {
   const queryClient = useQueryClient();
   const [activeSection, setActiveSection] = useState<string>("profile");
-  const [theme, setTheme] = useState<ThemeOption>("system");
   const [pinForm, setPinForm] = useState({ current: "", next: "", confirm: "" });
-  const [saving, setSaving] = useState(false);
 
   const { data: user } = useQuery({ queryKey: ["me"], queryFn: fetchMeApi });
 
@@ -69,19 +57,10 @@ export default function SettingsPage() {
     },
   });
 
-  const handleSave = (section: string) => {
-    setSaving(true);
-    setTimeout(() => {
-      setSaving(false);
-      toast.success(`${section} settings saved`);
-    }, 700);
-  };
-
   const sections = [
     { id: "profile", label: "My Profile", icon: User },
     { id: "security", label: "Security", icon: Lock },
     { id: "notifications", label: "Notifications", icon: Bell },
-    { id: "appearance", label: "Appearance", icon: Moon },
     { id: "system", label: "System Info", icon: Info },
   ];
 
@@ -249,40 +228,6 @@ export default function SettingsPage() {
             </>
           )}
 
-          {/* Appearance */}
-          {activeSection === "appearance" && (
-            <>
-              <div className="flex items-center gap-2 text-[#0D44A2] font-bold text-sm">
-                <Moon className="size-4" />
-                <span>Appearance</span>
-              </div>
-              <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Theme Mode</p>
-              <div className="grid grid-cols-3 gap-2">
-                {([
-                  { id: "light", label: "Light", icon: Sun },
-                  { id: "dark", label: "Dark", icon: Moon },
-                  { id: "system", label: "System", icon: Monitor },
-                ] as { id: ThemeOption; label: string; icon: React.ElementType }[]).map(t => {
-                  const Icon = t.icon;
-                  return (
-                    <button
-                      key={t.id}
-                      onClick={() => { setTheme(t.id); toast.success(`Theme set to ${t.label}`); }}
-                      className={`flex flex-col items-center gap-2 p-4 rounded-2xl border-2 transition-all cursor-pointer ${
-                        theme === t.id
-                          ? "border-[#0D44A2] bg-[#0D44A2]/5"
-                          : "border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700"
-                      }`}
-                    >
-                      <Icon className={`size-5 ${theme === t.id ? "text-[#0D44A2]" : "text-zinc-500"}`} />
-                      <span className={`text-xs font-bold ${theme === t.id ? "text-[#0D44A2]" : "text-zinc-600 dark:text-zinc-400"}`}>{t.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </>
-          )}
-
           {/* System Info */}
           {activeSection === "system" && (
             <>
@@ -295,11 +240,11 @@ export default function SettingsPage() {
                   ["Application", "Faraja Solution Loans"],
                   ["Version", "v1.0.0-beta"],
                   ["Environment", "Development"],
-                  ["API Status", "🟢 Connected"],
-                  ["Storage Mode", "In-Memory (Dev) / S3 (Production)"],
-                  ["Auth", "JWT Bearer Token (30 min expiry)"],
-                  ["Framework", "Next.js 15 + FastAPI"],
-                  ["Database", "PostgreSQL (planned)"],
+                  ["API Status", "Connected"],
+                  ["Storage Mode", "Database (base64) / S3 (Production)"],
+                  ["Auth", "JWT Bearer Token (60 min expiry)"],
+                  ["Framework", "Next.js 16 + FastAPI"],
+                  ["Database", "PostgreSQL (live)"],
                   ["Mobile", "PWA-ready, camera + signature support"],
                 ].map(([label, value]) => (
                   <div key={label} className="flex justify-between items-start py-2 border-b border-zinc-100 dark:border-zinc-800 last:border-0">
