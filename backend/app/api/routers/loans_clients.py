@@ -17,33 +17,34 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, Optional, List
+from typing import List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.dependencies.auth import get_current_user
+from app.core.permissions import get_user_permissions
 from app.db.session import get_db
-from app.models.branch import Branch
 from app.models.client import Client
 from app.models.enums import LoanStatus, PaymentMode
+from app.models.fee_payment import FeePayment
 from app.models.installment import Installment
 from app.models.loan import Loan
 from app.models.loan_product import LoanProduct
 from app.models.repayment import Repayment
 from app.models.user import User
-from app.services import loan_service
+from app.services import fee_service, loan_service
 
 router = APIRouter()
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
-def _require_permission(user: User, perm: str) -> None:
-    user_perms = {rp.permission.name for ur in user.roles for rp in ur.role.permissions}
+def _require_permission(db: Session, user: User, perm: str) -> None:
+    user_perms = get_user_permissions(db, user)
     if perm not in user_perms:
         raise HTTPException(status_code=403, detail=f"Permission '{perm}' required.")
 
@@ -177,6 +178,7 @@ class ClientCreateRequest(BaseModel):
     business_landmark: Optional[str] = None
     business_years: Optional[str] = None
     business_location: Optional[str] = None
+    estimated_asset_value: Optional[float] = None
     guarantor_surname: Optional[str] = None
     guarantor_first_name: Optional[str] = None
     guarantor_middle_name: Optional[str] = None
@@ -217,6 +219,7 @@ class RepaymentCreateRequest(BaseModel):
     amount: float
     mode: str = "Cash"
     reference: Optional[str] = None
+    receipt_photo: Optional[str] = None  # base64 payment screenshot
     notes: Optional[str] = None
     date: Optional[str] = None  # ISO date string; defaults to today
 
@@ -229,7 +232,7 @@ def get_clients(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _require_permission(current_user, "clients.view")
+    _require_permission(db, current_user, "clients.view")
     branch_ids = _get_user_branch_ids(current_user)
     stmt = select(Client).order_by(Client.client_number.desc())
     if search:
@@ -250,7 +253,7 @@ def get_client(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _require_permission(current_user, "clients.view")
+    _require_permission(db, current_user, "clients.view")
     client = db.scalar(select(Client).where(Client.id == client_id))
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
@@ -263,14 +266,12 @@ def create_client(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _require_permission(current_user, "clients.create")
+    _require_permission(db, current_user, "clients.create")
     client_number = loan_service._next_client_number(db)
     client = Client(
         client_number=client_number,
         registered_by_id=current_user.id,
-        **{k: (
-            [d.model_dump() for d in v] if isinstance(v, list) else v
-        ) for k, v in request.model_dump().items()},
+        **request.model_dump(),
     )
     db.add(client)
     db.commit()
@@ -285,7 +286,7 @@ def update_client(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _require_permission(current_user, "clients.edit")
+    _require_permission(db, current_user, "clients.update")
     client = db.scalar(select(Client).where(Client.id == client_id))
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
@@ -336,6 +337,9 @@ def _serialize_client(c: Client) -> dict:
         "business_landmark": c.business_landmark,
         "business_years": c.business_years,
         "business_location": c.business_location,
+        "estimated_asset_value": (
+            float(c.estimated_asset_value) if c.estimated_asset_value is not None else None
+        ),
         "guarantor_surname": c.guarantor_surname,
         "guarantor_first_name": c.guarantor_first_name,
         "guarantor_middle_name": c.guarantor_middle_name,
@@ -358,6 +362,7 @@ def _serialize_client(c: Client) -> dict:
         "branch": c.branch.name if c.branch else None,
         "branch_id": str(c.branch_id) if c.branch_id else None,
         "registered_by": c.registered_by.full_name if c.registered_by else None,
+        "date_registered": c.created_at.isoformat() if c.created_at else None,
         "created_at": c.created_at.isoformat() if c.created_at else None,
     }
 
@@ -392,7 +397,7 @@ def get_loans(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _require_permission(current_user, "loans.view")
+    _require_permission(db, current_user, "loans.view")
     branch_ids = _get_user_branch_ids(current_user)
     stmt = (
         select(Loan)
@@ -433,7 +438,7 @@ def get_loan(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _require_permission(current_user, "loans.view")
+    _require_permission(db, current_user, "loans.view")
     loan = _load_loan(loan_id, db)
     result = _enrich_loan(loan, db)
     # Include installments
@@ -459,11 +464,14 @@ def get_installments_calendar(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Returns installments for active loans covering 2 weeks past + N weeks ahead."""
-    _require_permission(current_user, "loans.view")
-    from datetime import timedelta, date as date_type
-    today = datetime.now(timezone.utc).date()
-    start = today - timedelta(days=14)
+    """Returns installments for active loans covering 6 months past + N weeks ahead."""
+    _require_permission(db, current_user, "loans.view")
+    from datetime import datetime
+    from datetime import timedelta
+
+    from app.core.time import today_nairobi
+    today = today_nairobi()
+    start = today - timedelta(days=180)
     end = today + timedelta(weeks=weeks_ahead)
 
     rows = db.scalars(
@@ -480,7 +488,7 @@ def get_installments_calendar(
 
     events = []
     for i in rows:
-        due = i.due_date if isinstance(i.due_date, date_type) else i.due_date.date()
+        due = i.due_date.date() if isinstance(i.due_date, datetime) else i.due_date
         is_overdue = due < today and i.status.value.lower() != "paid"
         events.append({
             "id": str(i.id),
@@ -505,7 +513,7 @@ def create_loan(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _require_permission(current_user, "loans.create")
+    _require_permission(db, current_user, "loans.create")
 
     client = db.scalar(select(Client).where(Client.id == request.client_id))
     if not client:
@@ -516,10 +524,18 @@ def create_loan(
         raise HTTPException(status_code=404, detail="Loan product not found")
 
     amount = Decimal(str(request.amount))
-    is_existing = db.scalar(
-        select(func.count()).select_from(Loan).where(Loan.client_id == request.client_id)
-    ) > 0
-    fee = loan_service.calculate_application_fee(amount, is_existing)
+    is_existing = fee_service.has_loan_history(db, request.client_id)
+    try:
+        fee = loan_service.calculate_application_fee(amount, is_existing)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    paid_fee = fee_service.get_verified_fee(db, request.client_id, fee)
+    if paid_fee is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Application fee of KES {fee} must be paid and verified before applying",
+        )
 
     loan = Loan(
         loan_number=loan_service._next_loan_number(db),
@@ -536,6 +552,8 @@ def create_loan(
         date_submitted=datetime.now(timezone.utc),
     )
     db.add(loan)
+    db.flush()
+    paid_fee.loan_id = loan.id
     db.commit()
     db.refresh(loan)
     return _enrich_loan(loan, db)
@@ -548,7 +566,7 @@ def approve_loan(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _require_permission(current_user, "loans.approve")
+    _require_permission(db, current_user, "loans.approve")
     loan = _load_loan(loan_id, db)
     try:
         loan_service.approve_loan(db, loan, current_user.id, request.note)
@@ -565,7 +583,7 @@ def reject_loan(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _require_permission(current_user, "loans.approve")
+    _require_permission(db, current_user, "loans.approve")
     loan = _load_loan(loan_id, db)
     try:
         loan_service.reject_loan(db, loan, current_user.id, request.note)
@@ -582,7 +600,7 @@ def disburse_loan(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _require_permission(current_user, "loans.disburse")
+    _require_permission(db, current_user, "loans.disburse")
     loan = _load_loan(loan_id, db)
     if not loan.loan_product:
         raise HTTPException(status_code=400, detail="Loan has no product assigned")
@@ -600,7 +618,7 @@ def close_loan(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _require_permission(current_user, "loans.disburse")
+    _require_permission(db, current_user, "loans.disburse")
     loan = _load_loan(loan_id, db)
     outstanding = loan_service.get_outstanding(db, loan)
     if outstanding > Decimal("0"):
@@ -643,7 +661,7 @@ def get_repayments(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _require_permission(current_user, "repayments.view")
+    _require_permission(db, current_user, "repayments.view")
     branch_ids = _get_user_branch_ids(current_user)
     stmt = (
         select(Repayment)
@@ -678,7 +696,7 @@ def create_repayment(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _require_permission(current_user, "repayments.create")
+    _require_permission(db, current_user, "repayments.record")
     loan = db.scalar(select(Loan).options(joinedload(Loan.client)).where(Loan.id == request.loan_id))
     if not loan:
         raise HTTPException(status_code=404, detail="Loan not found")
@@ -709,6 +727,7 @@ def create_repayment(
         date=payment_date,
         mode=pay_mode,
         reference=request.reference,
+        receipt_photo=request.receipt_photo,
         notes=request.notes,
         recorded_by_id=current_user.id,
         verified=False,
@@ -725,7 +744,7 @@ def verify_repayment(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _require_permission(current_user, "repayments.verify")
+    _require_permission(db, current_user, "repayments.verify")
     repayment = db.scalar(
         select(Repayment)
         .options(joinedload(Repayment.loan), joinedload(Repayment.client), joinedload(Repayment.recorded_by), joinedload(Repayment.verified_by))
@@ -738,6 +757,7 @@ def verify_repayment(
     repayment.verified = True
     repayment.verified_by_id = current_user.id
     repayment.verified_at = datetime.now(timezone.utc)
+    loan_service.mark_installments_paid(db, repayment.loan)
     db.commit()
     return _serialize_repayment(repayment)
 
@@ -749,10 +769,12 @@ def _serialize_repayment(r: Repayment) -> dict:
         "loan_number": r.loan.loan_number if r.loan else None,
         "client": r.client.name if r.client else "",
         "client_id": str(r.client_id),
+        "client_phone": r.client.phone if r.client else None,
         "amount": float(r.amount),
         "date": r.date.date().isoformat() if r.date else None,
         "mode": r.mode.value,
         "reference": r.reference,
+        "receipt_photo": r.receipt_photo,
         "notes": r.notes,
         "recorded_by": r.recorded_by.full_name if r.recorded_by else None,
         "verified": r.verified,
@@ -785,6 +807,10 @@ def get_dashboard_stats(
         select(func.count()).select_from(Repayment).where(Repayment.verified == False)
     ) or 0
 
+    fee_income = db.scalar(
+        select(func.coalesce(func.sum(FeePayment.amount), 0)).where(FeePayment.verified == True)
+    ) or Decimal("0")
+
     return {
         "total_clients": total_clients,
         "total_loans": total_loans,
@@ -793,12 +819,5 @@ def get_dashboard_stats(
         "total_disbursed": float(total_disbursed),
         "total_collected": float(total_collected),
         "unverified_repayments": unverified_repayments,
+        "fee_income": float(fee_income),
     }
-
-
-# ── BRANCHES ───────────────────────────────────────────────────────────────────
-
-@router.get("/branches")
-def get_branches(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    branches = db.scalars(select(Branch).where(Branch.active == True).order_by(Branch.name)).all()
-    return [{"id": str(b.id), "name": b.name, "code": b.code, "active": b.active} for b in branches]

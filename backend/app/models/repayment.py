@@ -21,6 +21,8 @@ class Repayment(BaseModel):
     date: Mapped[datetime] = mapped_column(nullable=False)
     mode: Mapped[PaymentMode] = mapped_column(Enum(PaymentMode), nullable=False, default=PaymentMode.CASH)
     reference: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # base64 payment screenshot
+    receipt_photo: Mapped[str | None] = mapped_column(Text, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     recorded_by_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)

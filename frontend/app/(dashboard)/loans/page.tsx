@@ -4,7 +4,7 @@ import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Banknote, Plus, Search, Eye, X, Loader2, CheckCircle2, Clock,
-  XCircle, ArrowUpRight, Filter, AlertTriangle, ChevronRight,
+  XCircle, ArrowUpRight, Filter, AlertTriangle, ChevronRight, TrendingUp,
   ThumbsUp, ThumbsDown, Send, Lock, Info, Receipt, Calendar,
   BadgeCheck, Flame, Save,
 } from "lucide-react";
@@ -14,12 +14,18 @@ import { fetchMeApi } from "@/features/auth/api";
 import {
   fetchLoansApi, fetchLoanApi, createLoanApi, approveLoanApi,
   rejectLoanApi, disburseLoanApi, closeLoanApi, fetchClientsApi,
-  type Loan, type LoanStatus, type Client,
+  fetchLoanProductsApi, fetchFeeQuoteApi, fetchFeesApi,
+  recordFeeApi, verifyFeeApi,
+  type Loan, type LoanStatus, type Client, type LoanProduct,
 } from "@/features/clients/api";
 
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+
+interface ApiError {
+  response?: { data?: { detail?: string } };
+}
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -30,11 +36,18 @@ const SECTOR_OPTIONS = [
 ];
 
 const STATUS_CFG: Record<LoanStatus, { color: string; bg: string; icon: React.ElementType; label: string }> = {
-  Pending:  { color: "text-amber-700 dark:text-amber-400", bg: "bg-amber-50 border-amber-200 dark:bg-amber-950/20 dark:border-amber-800", icon: Clock, label: "Pending Approval" },
-  Approved: { color: "text-blue-700 dark:text-blue-400", bg: "bg-blue-50 border-blue-200 dark:bg-blue-950/20 dark:border-blue-800", icon: CheckCircle2, label: "Approved" },
-  Disbursed:{ color: "text-emerald-700 dark:text-emerald-400", bg: "bg-emerald-50 border-emerald-200 dark:bg-emerald-950/20 dark:border-emerald-800", icon: ArrowUpRight, label: "Disbursed" },
-  Rejected: { color: "text-rose-700 dark:text-rose-400", bg: "bg-rose-50 border-rose-200 dark:bg-rose-950/20 dark:border-rose-800", icon: XCircle, label: "Rejected" },
-  Closed:   { color: "text-zinc-600 dark:text-zinc-400", bg: "bg-zinc-100 border-zinc-200 dark:bg-zinc-800 dark:border-zinc-700", icon: BadgeCheck, label: "Closed" },
+  Pending:      { color: "text-amber-700 dark:text-amber-400", bg: "bg-amber-50 border-amber-200 dark:bg-amber-950/20 dark:border-amber-800", icon: Clock, label: "Pending Approval" },
+  Approved:     { color: "text-blue-700 dark:text-blue-400", bg: "bg-blue-50 border-blue-200 dark:bg-blue-950/20 dark:border-blue-800", icon: CheckCircle2, label: "Approved" },
+  Disbursed:    { color: "text-emerald-700 dark:text-emerald-400", bg: "bg-emerald-50 border-emerald-200 dark:bg-emerald-950/20 dark:border-emerald-800", icon: ArrowUpRight, label: "Disbursed" },
+  "Almost Due": { color: "text-orange-700 dark:text-orange-400", bg: "bg-orange-50 border-orange-200 dark:bg-orange-950/20 dark:border-orange-800", icon: Clock, label: "Almost Due" },
+  Due:          { color: "text-[#F57424] dark:text-orange-400", bg: "bg-orange-50 border-orange-200 dark:bg-orange-950/20 dark:border-orange-800", icon: AlertTriangle, label: "Due Today" },
+  Performing:   { color: "text-emerald-700 dark:text-emerald-400", bg: "bg-emerald-50 border-emerald-200 dark:bg-emerald-950/20 dark:border-emerald-800", icon: TrendingUp, label: "Performing" },
+  Arrears:      { color: "text-rose-700 dark:text-rose-400", bg: "bg-rose-50 border-rose-200 dark:bg-rose-950/20 dark:border-rose-800", icon: AlertTriangle, label: "In Arrears" },
+  "Past Maturity": { color: "text-rose-700 dark:text-rose-400", bg: "bg-rose-50 border-rose-200 dark:bg-rose-950/20 dark:border-rose-800", icon: XCircle, label: "Past Maturity" },
+  Defaulter:    { color: "text-rose-700 dark:text-rose-400", bg: "bg-rose-50 border-rose-200 dark:bg-rose-950/20 dark:border-rose-800", icon: Flame, label: "Defaulter" },
+  Paid:         { color: "text-emerald-700 dark:text-emerald-400", bg: "bg-emerald-50 border-emerald-200 dark:bg-emerald-950/20 dark:border-emerald-800", icon: CheckCircle2, label: "Paid" },
+  Rejected:     { color: "text-rose-700 dark:text-rose-400", bg: "bg-rose-50 border-rose-200 dark:bg-rose-950/20 dark:border-rose-800", icon: XCircle, label: "Rejected" },
+  Closed:       { color: "text-zinc-600 dark:text-zinc-400", bg: "bg-zinc-100 border-zinc-200 dark:bg-zinc-800 dark:border-zinc-700", icon: BadgeCheck, label: "Closed" },
 };
 
 const WORKFLOW_STEPS: LoanStatus[] = ["Pending", "Approved", "Disbursed", "Closed"];
@@ -45,8 +58,9 @@ function useRole() {
   const { data: user } = useQuery({ queryKey: ["me"], queryFn: fetchMeApi });
   const role = (() => {
     if (!user) return "";
-    // UserProfile exposes a flat `role` string
+    // /auth/me exposes flat `role` + `roles[]` (backend-truth)
     if (user.role) return user.role;
+    if (user.roles?.length) return user.roles[0];
     if (user.employee_number?.includes("DIR")) return "Director";
     if (user.employee_number?.includes("SYS")) return "System Admin";
     if (user.employee_number?.includes("MGR")) return "Manager";
@@ -54,7 +68,7 @@ function useRole() {
     return "Auditor";
   })();
   const name = user ? `${user.first_name} ${user.last_name}` : "";
-  return { role, name, user };
+  return { role, name, permissions: user?.permissions ?? [] };
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -126,12 +140,12 @@ function MoneyRow({ label, value, color = "text-zinc-900 dark:text-zinc-100", bo
 function LoanDrawer({
   loanId,
   onClose,
-  role,
+  permissions,
   officerName,
 }: {
   loanId: string;
   onClose: () => void;
-  role: string;
+  permissions: string[];
   officerName: string;
 }) {
   const queryClient = useQueryClient();
@@ -174,9 +188,11 @@ function LoanDrawer({
 
   const anyPending = approveMut.isPending || rejectMut.isPending || disburseMut.isPending || closeMut.isPending;
 
-  const canApprove = role === "Manager" || role === "System Admin";
-  const canDisburse = role === "Director" || role === "System Admin";
-  const canReject = canApprove || canDisburse;
+  const has = (p: string) => permissions.includes(p);
+  const canApprove = has("loans.approve");
+  const canDisburse = has("loans.disburse");
+  const canReject = has("loans.reject");
+  const canAct = canApprove || canDisburse || canReject;
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-zinc-950/40 backdrop-blur-sm">
@@ -185,7 +201,7 @@ function LoanDrawer({
         <div className="sticky top-0 bg-white dark:bg-zinc-900 border-b border-zinc-100 dark:border-zinc-800 px-5 py-4 flex justify-between items-start z-10 shrink-0">
           <div>
             <h3 className="font-black text-zinc-900 dark:text-zinc-50">{isLoading ? "Loading..." : loan?.client}</h3>
-            <p className="text-xs font-mono text-zinc-400 mt-0.5">{loanId}</p>
+            <p className="text-xs font-mono text-zinc-400 mt-0.5">{!isLoading && loan?.loan_number}</p>
           </div>
           <button onClick={onClose} className="p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full cursor-pointer">
             <X className="size-5 text-zinc-500" />
@@ -371,10 +387,10 @@ function LoanDrawer({
                 )}
 
                 {/* Role restriction message */}
-                {!canApprove && !canDisburse && (
+                {!canAct && (
                   <div className="flex items-center gap-2 p-3 bg-zinc-50 dark:bg-zinc-850 rounded-xl border border-zinc-100 dark:border-zinc-800 text-xs text-zinc-500">
                     <Lock className="size-3.5 shrink-0" />
-                    <span>Your role ({role || "Auditor"}) is read-only. Actions require Manager or Director access.</span>
+                    <span>Your role is read-only for loans. Approve/Disburse actions require the relevant loan permission.</span>
                   </div>
                 )}
               </div>
@@ -398,58 +414,87 @@ function LoanDrawer({
 
 export default function LoansPage() {
   const queryClient = useQueryClient();
-  const { role, name: officerName } = useRole();
+  const { name: officerName, permissions } = useRole();
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [showNewForm, setShowNewForm] = useState(false);
   const [selectedLoanId, setSelectedLoanId] = useState<string | null>(null);
   const [form, setForm] = useState({
-    client: "", sector: "Retail & Trade", amount: "",
-    duration_days: "90", application_fee: "500", notes: "",
+    client_id: "", product_id: "", sector: "Retail & Trade", amount: "", notes: "",
   });
+  const [feeForm, setFeeForm] = useState({ mode: "Cash", reference: "", notes: "" });
 
   const { data: loans = [], isLoading } = useQuery({ queryKey: ["loans"], queryFn: fetchLoansApi });
 
   const { data: clients = [] } = useQuery({ queryKey: ["clients"], queryFn: fetchClientsApi });
 
-  const getApplicationFee = (clientName: string, amountStr: string): number => {
-    const amount = parseFloat(amountStr) || 0;
-    const nameClean = clientName.trim().toLowerCase();
-    const isExisting = clients.some((c: Client) => c.name.trim().toLowerCase() === nameClean) ||
-                       loans.some((l: Loan) => l.client.trim().toLowerCase() === nameClean);
+  const { data: products = [] } = useQuery({ queryKey: ["loan-products"], queryFn: fetchLoanProductsApi });
 
-    if (amount >= 4000 && amount <= 10000) {
-      return isExisting ? 600 : 800;
-    } else if (amount > 10000) {
-      return isExisting ? 1000 : 1500;
-    }
-    return 500;
-  };
+  const parsedAmount = parseFloat(form.amount);
 
+  const { data: quote } = useQuery({
+    queryKey: ["feeQuote", form.client_id, parsedAmount],
+    queryFn: () => fetchFeeQuoteApi(form.client_id, parsedAmount),
+    enabled: !!form.client_id && !Number.isNaN(parsedAmount) && parsedAmount >= 4000,
+  });
+
+  const { data: fees = [], refetch: refetchFees } = useQuery({
+    queryKey: ["fees", form.client_id],
+    queryFn: () => fetchFeesApi(form.client_id),
+    enabled: !!form.client_id,
+  });
+
+  const paidFee = fees.find((f) => f.verified && !f.loan_id && f.amount === quote?.amount);
+  const canRecordFee = permissions.includes("fees.record");
+  const canVerifyFee = permissions.includes("fees.verify");
+
+  const recordFeeMut = useMutation({
+    mutationFn: () =>
+      recordFeeApi({
+        client_id: form.client_id,
+        amount: quote?.amount ?? 0,
+        mode: feeForm.mode,
+        reference: feeForm.reference || undefined,
+        notes: feeForm.notes || undefined,
+      }),
+    onSuccess: () => {
+      toast.success("Fee payment recorded — pending verification");
+      refetchFees();
+      setFeeForm({ mode: "Cash", reference: "", notes: "" });
+    },
+    onError: (e) => toast.error((e as ApiError).response?.data?.detail || "Failed to record fee"),
+  });
+
+  const verifyFeeMut = useMutation({
+    mutationFn: (feeId: string) => verifyFeeApi(feeId),
+    onSuccess: () => {
+      toast.success("Fee payment verified");
+      refetchFees();
+    },
+    onError: (e) => toast.error((e as ApiError).response?.data?.detail || "Failed to verify fee"),
+  });
 
   const createMut = useMutation({
-    mutationFn: () => {
-      const calculatedFee = getApplicationFee(form.client, form.amount);
-      return createLoanApi({
-        client: form.client, sector: form.sector,
-        amount: parseFloat(form.amount),
-        duration_days: parseInt(form.duration_days) || 90,
-        application_fee: calculatedFee,
-        notes: form.notes,
-        submitted_by: officerName || "Loan Officer",
-      });
-    },
+    mutationFn: () =>
+      createLoanApi({
+        client_id: form.client_id,
+        loan_product_id: form.product_id,
+        amount: parsedAmount,
+        sector: form.sector,
+        notes: form.notes || undefined,
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["loans"] });
       toast.success("Loan application submitted!");
       setShowNewForm(false);
-      setForm({ client: "", sector: "Retail & Trade", amount: "", duration_days: "90", application_fee: "500", notes: "" });
+      setForm({ client_id: "", product_id: "", sector: "Retail & Trade", amount: "", notes: "" });
+      setFeeForm({ mode: "Cash", reference: "", notes: "" });
     },
-    onError: (e: any) => toast.error(e.response?.data?.detail || "Submission failed"),
+    onError: (e) => toast.error((e as ApiError).response?.data?.detail || "Submission failed"),
   });
 
 
-  const canCreate = ["Loan Officer", "Manager", "Director", "System Admin"].includes(role);
+  const canCreate = permissions.includes("loans.create");
 
   const filtered = loans.filter((l) => {
     const q = searchQuery.toLowerCase();
@@ -523,7 +568,7 @@ export default function LoansPage() {
                   <div className="flex justify-between items-start">
                     <div className="min-w-0 mr-2">
                       <p className="font-bold text-zinc-900 dark:text-zinc-100 text-sm truncate">{loan.client}</p>
-                      <p className="text-[10px] font-mono text-zinc-400">{loan.id} · {loan.sector}</p>
+                      <p className="text-[10px] font-mono text-zinc-400">{loan.loan_number} · {loan.sector}</p>
                     </div>
                     <div className="flex flex-col items-end gap-1 shrink-0">
                       <StatusBadge status={loan.status} />
@@ -547,7 +592,7 @@ export default function LoansPage() {
               <table className="w-full text-xs text-left border-collapse">
                 <thead>
                   <tr className="border-b border-zinc-100 dark:border-zinc-850 text-zinc-400 font-bold uppercase tracking-wider text-[10px]">
-                    <th className="py-3 px-2">Loan ID</th>
+                    <th className="py-3 px-2">Loan No.</th>
                     <th className="py-3 px-2">Client</th>
                     <th className="py-3 px-2">Sector</th>
                     <th className="py-3 px-2">Principal</th>
@@ -560,7 +605,7 @@ export default function LoansPage() {
                 <tbody className="divide-y divide-zinc-100/50 dark:divide-zinc-850/50">
                   {filtered.map(loan => (
                     <tr key={loan.id} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-850/10 transition-colors">
-                      <td className="py-3 px-2 font-mono font-bold text-zinc-500 text-[10px]">{loan.id}</td>
+                      <td className="py-3 px-2 font-mono font-bold text-zinc-500 text-[10px]">{loan.loan_number}</td>
                       <td className="py-3 px-2 font-bold text-zinc-900 dark:text-zinc-100">{loan.client}</td>
                       <td className="py-3 px-2 text-zinc-500">{loan.sector}</td>
                       <td className="py-3 px-2 font-bold text-[#0D44A2] dark:text-blue-400">KES {loan.amount.toLocaleString()}</td>
@@ -597,48 +642,141 @@ export default function LoansPage() {
               <h3 className="font-black text-zinc-900 dark:text-zinc-50 text-base">New Loan Application</h3>
               <button onClick={() => setShowNewForm(false)} className="p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full cursor-pointer"><X className="size-4 text-zinc-500" /></button>
             </div>
-            <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-2xl p-3 mb-4 text-xs text-amber-700 dark:text-amber-400">
-              <strong>Fee:</strong> KES {getApplicationFee(form.client, form.amount).toLocaleString()} Application Fee — collected manually.
-              <br /><strong>Interest:</strong> 20% flat on principal added at disbursement.
-            </div>
 
-            <form onSubmit={(e) => { e.preventDefault(); if (!form.client || !form.amount) { toast.error("Client and amount required"); return; } createMut.mutate(); }}
-              className="space-y-4">
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              if (!form.client_id) return toast.error("Select a client");
+              if (!form.product_id) return toast.error("Select a loan product");
+              if (Number.isNaN(parsedAmount) || parsedAmount < 4000) return toast.error("Minimum loan amount is KES 4,000");
+              if (!paidFee) return toast.error("Application fee must be paid and verified first");
+              createMut.mutate();
+            }} className="space-y-4">
               <div className="space-y-1.5">
-                <Label className="text-xs font-semibold">Client / Business Name <span className="text-rose-500">*</span></Label>
-                <Input value={form.client} onChange={e => setForm({...form, client: e.target.value})} placeholder="e.g. Baraka Seeds & Fertilizers" required className="rounded-xl" />
+                <Label className="text-xs font-semibold">Client <span className="text-rose-500">*</span></Label>
+                <select value={form.client_id} onChange={e => setForm({...form, client_id: e.target.value})}
+                  className="w-full h-10 border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 rounded-xl text-sm px-3 focus:outline-none">
+                  <option value="">Select client…</option>
+                  {clients.map((c: Client) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
               </div>
               <div className="space-y-1.5">
-                <Label className="text-xs font-semibold">Business Sector <span className="text-rose-500">*</span></Label>
-                <select value={form.sector} onChange={e => setForm({...form, sector: e.target.value})}
+                <Label className="text-xs font-semibold">Loan Product <span className="text-rose-500">*</span></Label>
+                <select value={form.product_id} onChange={e => setForm({...form, product_id: e.target.value})}
                   className="w-full h-10 border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 rounded-xl text-sm px-3 focus:outline-none">
-                  {SECTOR_OPTIONS.map(s => <option key={s}>{s}</option>)}
+                  <option value="">Select product…</option>
+                  {products.map((p: LoanProduct) => (
+                    <option key={p.id} value={p.id}>{p.name} — {p.duration_days} days @ {(p.interest_rate * 100).toFixed(0)}%</option>
+                  ))}
                 </select>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <Label className="text-xs font-semibold">Principal (KES) <span className="text-rose-500">*</span></Label>
-                  <Input type="number" value={form.amount} onChange={e => setForm({...form, amount: e.target.value})} placeholder="e.g. 500000" required className="rounded-xl" />
+                  <Input type="number" min={4000} value={form.amount} onChange={e => setForm({...form, amount: e.target.value})} placeholder="e.g. 500000" required className="rounded-xl" />
                 </div>
                 <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold">Duration (days)</Label>
-                  <Input type="number" value={form.duration_days} onChange={e => setForm({...form, duration_days: e.target.value})} placeholder="90" className="rounded-xl" />
+                  <Label className="text-xs font-semibold">Sector <span className="text-rose-500">*</span></Label>
+                  <select value={form.sector} onChange={e => setForm({...form, sector: e.target.value})}
+                    className="w-full h-10 border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 rounded-xl text-sm px-3 focus:outline-none">
+                    {SECTOR_OPTIONS.map(s => <option key={s}>{s}</option>)}
+                  </select>
                 </div>
               </div>
-              {form.amount && (
-                <div className="bg-[#0D44A2]/5 border border-[#0D44A2]/15 rounded-xl p-3 text-xs space-y-1">
-                  <p className="font-semibold text-[#0D44A2]">💡 Auto-calculation preview</p>
-                  <p className="text-zinc-600 dark:text-zinc-400">Interest (20%): <strong>KES {(parseFloat(form.amount || "0") * 0.20).toLocaleString()}</strong></p>
-                  <p className="text-zinc-600 dark:text-zinc-400">Total Repayable: <strong>KES {(parseFloat(form.amount || "0") * 1.20).toLocaleString()}</strong></p>
+
+              {/* Fee quote */}
+              {form.client_id && !Number.isNaN(parsedAmount) && parsedAmount < 4000 && (
+                <div className="bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-800 rounded-xl p-3 text-xs text-rose-700 dark:text-rose-400 font-semibold">
+                  Minimum loan amount is KES 4,000.
                 </div>
               )}
+              {quote && (
+                <div className="bg-[#0D44A2]/5 border border-[#0D44A2]/15 rounded-xl p-3 text-xs space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-[#0D44A2]">Application Fee ({quote.tier === "existing" ? "Existing client" : "New client"})</span>
+                    <span className="font-black text-sm text-[#0D44A2]">KES {quote.amount.toLocaleString()}</span>
+                  </div>
+                  <p className="text-zinc-500 dark:text-zinc-400">Must be paid and verified before the application can be submitted.</p>
+                </div>
+              )}
+
+              {/* Fee payment status */}
+              {paidFee && (
+                <div className="bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800 rounded-xl p-3 text-xs flex items-center gap-2 text-emerald-700 dark:text-emerald-400">
+                  <CheckCircle2 className="size-4 shrink-0" />
+                  <span><strong>KES {paidFee.amount.toLocaleString()}</strong> fee paid & verified{paidFee.verified_by ? ` by ${paidFee.verified_by}` : ""}.</span>
+                </div>
+              )}
+
+              {!paidFee && quote && (
+                <div className="space-y-3">
+                  <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-xl p-3 text-xs text-amber-700 dark:text-amber-400 flex items-center gap-2">
+                    <Clock className="size-4 shrink-0" />
+                    <span>Awaiting verified fee payment of <strong>KES {quote.amount.toLocaleString()}</strong>.</span>
+                  </div>
+
+                  {/* Recent fees */}
+                  {fees.length > 0 && (
+                    <div className="space-y-1.5">
+                      {fees.map((f) => (
+                        <div key={f.id} className="flex items-center justify-between border border-zinc-100 dark:border-zinc-800 rounded-xl p-2.5 text-xs">
+                          <div className="min-w-0">
+                            <p className="font-bold text-zinc-900 dark:text-zinc-100">KES {f.amount.toLocaleString()} · {f.mode}</p>
+                            <p className="text-[10px] text-zinc-400 truncate">
+                              {f.reference || "No reference"} · recorded by {f.recorded_by || "—"}
+                              {f.loan_number ? ` · used on ${f.loan_number}` : ""}
+                            </p>
+                          </div>
+                          {f.verified ? (
+                            <span className="text-[10px] font-bold text-emerald-600 flex items-center gap-1 shrink-0"><BadgeCheck className="size-3" />Verified</span>
+                          ) : (
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <span className="text-[10px] font-bold text-amber-600 flex items-center gap-1"><Clock className="size-3" />Pending</span>
+                              {canVerifyFee && (
+                                <Button type="button" variant="outline" size="sm" disabled={verifyFeeMut.isPending}
+                                  onClick={() => verifyFeeMut.mutate(f.id)}
+                                  className="rounded-lg h-7 text-[10px] font-bold border-amber-200 text-amber-700 hover:bg-amber-50 cursor-pointer">
+                                  Verify
+                                </Button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Record fee */}
+                  {canRecordFee && (
+                    <div className="border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 space-y-2.5 bg-zinc-50/50 dark:bg-zinc-900/50">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Record fee payment — KES {quote.amount.toLocaleString()}</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        <select value={feeForm.mode} onChange={e => setFeeForm({...feeForm, mode: e.target.value})}
+                          className="h-10 border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 rounded-xl text-xs px-3 focus:outline-none">
+                          {["Cash", "MPesa", "BankTransfer", "Cheque", "Other"].map(m => <option key={m}>{m}</option>)}
+                        </select>
+                        <Input value={feeForm.reference} onChange={e => setFeeForm({...feeForm, reference: e.target.value})} placeholder="M-Pesa ref (optional)" className="rounded-xl text-xs" />
+                      </div>
+                      <Button type="button" disabled={recordFeeMut.isPending} onClick={() => recordFeeMut.mutate()}
+                        className="w-full bg-[#0D44A2] hover:bg-[#0A3682] text-white rounded-xl h-10 text-xs font-bold cursor-pointer">
+                        {recordFeeMut.isPending ? <Loader2 className="animate-spin size-4" /> : <Banknote className="size-4 mr-1" />}
+                        Record Payment
+                      </Button>
+                      <p className="text-[10px] text-zinc-400">A manager must verify this payment before the application can be submitted.</p>
+                    </div>
+                  )}
+                  {!canRecordFee && (
+                    <p className="text-[10px] text-zinc-400">Ask a loan officer to record the fee payment.</p>
+                  )}
+                </div>
+              )}
+
               <div className="space-y-1.5">
                 <Label className="text-xs font-semibold">Notes / Purpose</Label>
                 <Input value={form.notes} onChange={e => setForm({...form, notes: e.target.value})} placeholder="e.g. Seasonal stock purchase" className="rounded-xl" />
               </div>
               <div className="flex gap-3 pt-1">
                 <Button type="button" variant="outline" onClick={() => setShowNewForm(false)} className="flex-1 rounded-xl h-10 text-xs font-bold">Cancel</Button>
-                <Button type="submit" disabled={createMut.isPending} className="flex-1 bg-[#0D44A2] hover:bg-[#0A3682] text-white rounded-xl h-10 text-xs font-bold">
+                <Button type="submit" disabled={createMut.isPending || !paidFee} className="flex-1 bg-[#0D44A2] hover:bg-[#0A3682] text-white rounded-xl h-10 text-xs font-bold">
                   {createMut.isPending ? <Loader2 className="animate-spin size-4" /> : <Save className="size-4 mr-1" />}
                   Submit Application
                 </Button>
@@ -650,7 +788,7 @@ export default function LoansPage() {
 
       {/* Loan Detail Drawer */}
       {selectedLoanId && (
-        <LoanDrawer loanId={selectedLoanId} onClose={() => setSelectedLoanId(null)} role={role} officerName={officerName} />
+        <LoanDrawer loanId={selectedLoanId} onClose={() => setSelectedLoanId(null)} permissions={permissions} officerName={officerName} />
       )}
     </div>
   );

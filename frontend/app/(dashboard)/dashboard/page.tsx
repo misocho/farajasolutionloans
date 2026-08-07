@@ -33,7 +33,7 @@ import { toast } from "sonner";
 import { StatCard } from "@/components/dashboard/stat-card";
 import { QuickActions } from "@/components/dashboard/quick-actions";
 import { fetchMeApi } from "@/features/auth/api";
-import { fetchLoansApi, createLoanApi, fetchClientsApi, createClientApi, createRepaymentApi, type Loan } from "@/features/clients/api";
+import { fetchLoansApi, createLoanApi, fetchClientsApi, createClientApi, createRepaymentApi, fetchLoanProductsApi, type Loan, type LoanProduct } from "@/features/clients/api";
 
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -64,7 +64,7 @@ export default function DashboardPage() {
   const [submitting, setSubmitting] = useState(false);
 
   // Form Field States
-  const [newLoan, setNewLoan] = useState({ client: "", sector: "Retail", amount: "" });
+  const [newLoan, setNewLoan] = useState({ client_id: "", product_id: "", sector: "Retail", amount: "" });
   const [newClient, setNewClient] = useState({ name: "", sector: "Retail", email: "", phone: "" });
   const [newRepayment, setNewRepayment] = useState({ loanId: "", amount: "", method: "M-Pesa" });
 
@@ -87,6 +87,11 @@ export default function DashboardPage() {
     queryFn: fetchClientsApi,
   });
 
+  const { data: products = [] } = useQuery({
+    queryKey: ["loan-products"],
+    queryFn: fetchLoanProductsApi,
+  });
+
   // Mutations
   const createLoanMutation = useMutation({
     mutationFn: createLoanApi,
@@ -101,11 +106,11 @@ export default function DashboardPage() {
         description: `Loan ${data.id} is pending verification.`,
       });
 
-      setNewLoan({ client: "", sector: "Retail", amount: "" });
+      setNewLoan({ client_id: "", product_id: "", sector: "Retail", amount: "" });
       setActiveModal(null);
     },
-    onError: () => {
-      toast.error("Failed to submit credit application");
+    onError: (e: any) => {
+      toast.error(e.response?.data?.detail || "Failed to submit credit application");
     },
     onSettled: () => setSubmitting(false),
   });
@@ -202,6 +207,13 @@ export default function DashboardPage() {
       disbursed: "bg-blue-500/10 text-blue-600 border-blue-500/20",
       pending: "bg-amber-500/10 text-amber-600 border-amber-500/20",
       rejected: "bg-rose-500/10 text-rose-600 border-rose-500/20",
+      performing: "bg-emerald-500/10 text-emerald-600 border-emerald-500/20",
+      paid: "bg-emerald-500/10 text-emerald-600 border-emerald-500/20",
+      "almost due": "bg-orange-500/10 text-orange-600 border-orange-500/20",
+      due: "bg-orange-500/10 text-orange-600 border-orange-500/20",
+      arrears: "bg-rose-500/10 text-rose-600 border-rose-500/20",
+      "past maturity": "bg-rose-500/10 text-rose-600 border-rose-500/20",
+      defaulter: "bg-rose-500/10 text-rose-600 border-rose-500/20",
     };
     return (
       <span className={`px-2.5 py-1 text-xs font-bold rounded-full border ${styles[status.toLowerCase()]}`}>
@@ -213,16 +225,16 @@ export default function DashboardPage() {
   // 1. Submit Loan Request
   const handleApplyLoanSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newLoan.client || !newLoan.amount) {
+    if (!newLoan.client_id || !newLoan.product_id || !newLoan.amount) {
       toast.error("Please fill in all fields.");
       return;
     }
     setSubmitting(true);
     createLoanMutation.mutate({
-      client: newLoan.client,
+      client_id: newLoan.client_id,
+      loan_product_id: newLoan.product_id,
       sector: newLoan.sector,
       amount: parseFloat(newLoan.amount),
-      duration_days: 90,
     });
   };
 
@@ -559,19 +571,34 @@ export default function DashboardPage() {
             
             <form onSubmit={handleApplyLoanSubmit} className="space-y-4 mt-4">
               <div className="space-y-1">
-                <Label htmlFor="loan-client" className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Client / Business Name</Label>
+                <Label htmlFor="loan-client" className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Client</Label>
                 <select
                   id="loan-client"
-                  value={newLoan.client}
-                  onChange={(e) => setNewLoan({ ...newLoan, client: e.target.value })}
+                  value={newLoan.client_id}
+                  onChange={(e) => setNewLoan({ ...newLoan, client_id: e.target.value })}
                   className="w-full h-10 border border-zinc-200/80 bg-zinc-50/50 rounded-xl text-sm px-3 focus:outline-primary dark:bg-zinc-900 dark:border-zinc-850"
                   required
                 >
                   <option value="">-- Choose client --</option>
                   {clients.map((c) => (
-                    <option key={c.id} value={c.name}>{c.name}</option>
+                    <option key={c.id} value={c.id}>{c.name}</option>
                   ))}
-                  <option value="New Business Ltd">New Business Ltd (Direct Entry)</option>
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <Label htmlFor="loan-product" className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Loan Product</Label>
+                <select
+                  id="loan-product"
+                  value={newLoan.product_id}
+                  onChange={(e) => setNewLoan({ ...newLoan, product_id: e.target.value })}
+                  className="w-full h-10 border border-zinc-200/80 bg-zinc-50/50 rounded-xl text-sm px-3 focus:outline-primary dark:bg-zinc-900 dark:border-zinc-850"
+                  required
+                >
+                  <option value="">-- Choose product --</option>
+                  {products.map((p: LoanProduct) => (
+                    <option key={p.id} value={p.id}>{p.name} — {p.duration_days} days</option>
+                  ))}
                 </select>
               </div>
 

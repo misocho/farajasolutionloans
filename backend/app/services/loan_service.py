@@ -40,12 +40,15 @@ def calculate_interest(product: LoanProduct, amount: Decimal) -> Decimal:
 
 
 def calculate_application_fee(amount: Decimal, is_existing_client: bool) -> Decimal:
-    """Tiered application fee based on loan amount."""
-    if Decimal("4000") <= amount <= Decimal("10000"):
+    """Tiered application fee based on loan amount.
+
+    Raises ValueError for amounts below the minimum loan (KES 4,000).
+    """
+    if amount < Decimal("4000"):
+        raise ValueError("Minimum loan amount is KES 4,000")
+    if amount <= Decimal("10000"):
         return Decimal("600") if is_existing_client else Decimal("800")
-    elif amount > Decimal("10000"):
-        return Decimal("1000") if is_existing_client else Decimal("1500")
-    return Decimal("500")
+    return Decimal("1000") if is_existing_client else Decimal("1500")
 
 
 def calculate_installment_amount(total_repayable: Decimal, num_weeks: int) -> Decimal:
@@ -73,8 +76,8 @@ def calculate_penalty(
 def get_computed_loan_status(loan: Loan, outstanding: Decimal) -> str:
     """
     Derive display status from DB status + dates + outstanding balance.
-    Returns one of: Pending, Approved, Disbursed, Almost Due, Due, Arrears,
-                    Missed Payment, Past Maturity, Defaulter, Closed, Rejected
+    Returns one of: Pending, Approved, Disbursed, Almost Due, Due, Performing,
+                    Arrears, Past Maturity, Defaulter, Closed, Rejected
     """
     if loan.status in (LoanStatus.PENDING, LoanStatus.APPROVED, LoanStatus.REJECTED, LoanStatus.CLOSED):
         return loan.status.value
@@ -94,9 +97,14 @@ def get_computed_loan_status(loan: Loan, outstanding: Decimal) -> str:
             return "Due"
         if (due - today).days <= 2:
             return "Almost Due"
-        # Check for partial payment (arrears)
-        if outstanding < loan.total_repayable:
+        # Behind schedule: verified payments are short of what is due so far
+        due_to_date = sum(i.amount for i in loan.installments if i.due_date.date() <= today)
+        expected_outstanding = loan.total_repayable - due_to_date
+        if outstanding > expected_outstanding:
             return "Arrears"
+        # Up to date (or ahead of) the schedule: some payments made / due installments covered
+        if due_to_date > 0 or outstanding < loan.total_repayable:
+            return "Performing"
 
     return loan.status.value
 
@@ -185,3 +193,35 @@ def get_outstanding(db: Session, loan: Loan) -> Decimal:
         .where(Repayment.loan_id == loan.id, Repayment.verified == True)
     ) or Decimal("0")
     return max(loan.total_repayable - Decimal(str(verified_paid)), Decimal("0"))
+
+
+# ── Installment payment status ──────────────────────────────────────────────────
+
+def mark_installments_paid(db: Session, loan: Loan) -> None:
+    """
+    Mark installments as Paid, oldest-first, based on verified repayments.
+    An installment is paid only when cumulative verified payments fully cover it.
+    """
+    paid_total = db.scalar(
+        select(func.coalesce(func.sum(Repayment.amount), 0))
+        .where(Repayment.loan_id == loan.id, Repayment.verified == True)
+    ) or Decimal("0")
+
+    installments = db.scalars(
+        select(Installment)
+        .where(Installment.loan_id == loan.id)
+        .order_by(Installment.due_date)
+    ).all()
+
+    remaining = Decimal(str(paid_total))
+    for inst in installments:
+        if inst.status == InstallmentStatus.PAID:
+            remaining -= inst.amount
+            continue
+        if remaining >= inst.amount:
+            inst.status = InstallmentStatus.PAID
+            inst.paid_at = datetime.now(timezone.utc)
+            remaining -= inst.amount
+        else:
+            break
+    db.flush()
