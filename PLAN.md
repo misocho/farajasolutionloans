@@ -27,7 +27,7 @@
 
 ## Actual Progress Snapshot (from 2026-08-07 code survey)
 
-> Backend is **fully DB-backed — zero mock-data endpoints remain**. Frontend is mostly wired to real APIs. Remaining work: P1 invite UI completion, settings change-password wiring, client detail fetch, advanced loan statuses, financial report, scheduled email jobs, PDF service, and bug fixes below.
+> Backend is **fully DB-backed — zero mock-data endpoints remain**. Frontend is mostly wired to real APIs. Remaining work: complete-profile, settings change-password wiring, client detail fetch, advanced loan statuses, financial report, scheduled email jobs, PDF service, and bug fixes below.
 
 ### Known Bugs / Blockers (fix first)
 
@@ -87,7 +87,7 @@
 |------|---------|----------|-------|
 | Auth (login, JWT, /me) | ✅ Real DB | ✅ | JWT cookie, 401 → redirect login |
 | Admin — users/roles/permissions CRUD | ✅ Real DB | ✅ | Directory + permissions matrix |
-| **User invite/onboarding flow** | ✅ Real DB + Resend | ✅ Accept-invite page; ⚠️ invite UI + status mgmt missing on users page | `POST /auth/complete-profile` missing (backend) |
+| **User invite/onboarding flow** | ✅ Real DB + Resend | ✅ Full UI (invite modal, pending invites tab, approve/cancel, status actions) — verified live 2026-08-07 | `POST /auth/complete-profile` missing (backend) |
 | Loan products (Faraja 4wk, 5wk, Lumpsum) | ✅ Real DB, 3 seeded | ✅ Product dropdown from `/loan-products` (2026-08-07) | Lumpsum rate placeholder |
 | Client registration (full form with photos, signatures) | ✅ Real DB | ✅ 7-step form with signature pads | Detail drawer uses list data, not `GET /clients/{id}` |
 | **Application fees** | ✅ Real DB (2026-08-07): `fee_payments` table, quote/record/verify endpoints, loan creation gated on verified fee, 4k min, fee income in dashboard+summary | ✅ Loan-apply modal: client+product selects, quote, pay/verify UI, submit blocked until verified | Seed once for new `fees.*` permissions |
@@ -167,7 +167,7 @@ Director sends invite (Name + Email + Role + Branch)
 ---
 
 ## PRIORITY 1 — User Onboarding & Invite Flow
-> **Status:** `[/]` In progress — backend done, frontend partially done
+> **Status:** `[x]` Invite flow complete (verified live 2026-08-07); remaining: `complete-profile` (deferred), change-password wiring (Settings)
 
 ### Backend — ✅ COMPLETE
 
@@ -186,8 +186,8 @@ Director sends invite (Name + Email + Role + Branch)
 
 - [x] `app/(auth)/accept-invite/page.tsx` — token read, set password, success w/ employee number
 - [ ] `app/(auth)/complete-profile/page.tsx` — ❌ page does not exist
-- [ ] `app/(dashboard)/users/page.tsx` — ❌ **missing:** invite modal, pending invites tab, approve action, status badges, activate/deactivate/suspend/reset actions (only directory + permissions matrix exist)
-- [ ] `features/admin/api.ts` — invite/fetchInvites/cancelInvite/approveUser/updateUserStatus/resetPassword functions missing (only fetch users/roles/permissions + role updates exist)
+- [x] `app/(dashboard)/users/page.tsx` — ✅ invite modal, pending invites tab, approve/cancel, status badges, activate/deactivate/suspend/reset actions (2026-08-07)
+- [x] `features/admin/api.ts` — ✅ invite/fetchInvites/cancelInvite/approveUser/updateUserStatus/resetPassword functions (2026-08-07)
 - [x] `features/auth/api.ts` — `acceptInviteApi` added ✅ (2026-08-07); `completeProfileApi`/`changePasswordApi` ❌
 - [ ] `app/(dashboard)/settings/page.tsx` — change-password form exists but is a **fake `setTimeout` save**; not wired to `PATCH /auth/change-password`
 
