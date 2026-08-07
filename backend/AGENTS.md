@@ -46,6 +46,7 @@ Backend of the Faraja Solution Loans microfinance system. Read the root `../AGEN
 - `uv.lock` / `pyproject.toml` — no dependency changes without approval.
 - `alembic/versions/*` — immutable once applied; new revisions only.
 - Seeded data definitions (`app/core/branches.py`, `app/core/permissions.py`, `app/db/seed.py`, `app/db/seed_data.py`) — never rewrite without flagging that reseeding is needed.
+- **Database resets are forbidden.** The staging DB was reset exactly once (2026-08-07, see root `../AGENTS.md`) to rebuild the seed for the current schema. All subsequent changes ship as Alembic revisions only. `python -m app.db.seed` is idempotent and may be re-run freely.
 - `PLAN.md` status sections — update only as part of a plan-update task.
 - No `git commit`/`git push` unless explicitly asked.
 

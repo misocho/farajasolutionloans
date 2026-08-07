@@ -111,6 +111,13 @@ Use these exact strings. Known historical violations (do not reintroduce): `clie
 7. ✅ **Fixed 2026-08-07** — client registration 500 `AttributeError: 'dict' object has no attribute 'model_dump'`: Pydantic v2 `model_dump()` already serializes nested models to dicts, so `create_client`'s list comprehension crashed on any non-empty dependants/next-of-kin/properties (empty lists passed silently). Fixed: `**request.model_dump()` (`loans_clients.py`).
 8. ✅ **Fixed 2026-08-07** — expired/invalid JWT returned 500 instead of 401 on every authed endpoint: `get_current_user` only caught `AuthenticationError` but jose raises `ValueError`. Fixed: catch both → 401 (`dependencies/auth.py`), so the frontend interceptor redirects to `/login?expired=true`.
 
+## Staging database policy (2026-08-07) — FIRST AND LAST RESET
+
+- **The staging DB was reset exactly once** (2026-08-07) so the seed could be rebuilt to match the current schema: 11 branches, 6 roles + 2 extra demo users (FS-LO002/FS-MGR002, Kilifi), 3 loan products, 9 demo clients (full KYC), 8 loans covering **every state** (Pending, Approved, Rejected, Performing, Arrears, Past Maturity, Defaulter, Paid/Closed), installments + repayments (verified **and** unverified for the Finance Officer), and 9 fee payments (8 verified + 1 unverified for the verification workflow). Seed data lives in `app/db/seed_data.py`; dates are day-offsets so states stay valid whenever reseeded.
+- **This is the LAST full database reset. From now on: migrations only.** Any schema or data change ships as a new Alembic revision (`uv run alembic revision --autogenerate`, review it, apply with `uv run alembic upgrade head`). Never drop/recreate the staging or production database again without explicit user authorization.
+- `python -m app.db.seed` (and `POST /internal/seed` with `X-Seed-Key`) is **additive and idempotent** — safe to re-run any time; it never deletes or rewrites existing rows.
+- Staging DB connection details live in the Render service env vars (the Neon URL is commented out in `backend/.env` — the active local URL points at the dev docker Postgres).
+
 ## Boundaries — do not touch without asking
 
 - `backend/.env` (secrets — gitignored, never commit), `frontend/.env.local`, `node_modules/`, `.next/`, `.venv/`, `uv.lock`/`pnpm-lock.yaml` (no dependency changes without approval), `alembic/versions/*` (migrations are immutable once applied — new revisions only), `PLAN.md` status sections (update only as part of a plan-update task).
