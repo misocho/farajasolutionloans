@@ -421,10 +421,25 @@ export default function LoansPage() {
   const [statusFilter, setStatusFilter] = useState("All");
   const [showNewForm, setShowNewForm] = useState(false);
   const [selectedLoanId, setSelectedLoanId] = useState<string | null>(null);
+  const [deepLinkLoanId, setDeepLinkLoanId] = useState<string | null>(null);
   const [form, setForm] = useState({
     client_id: "", product_id: "", sector: "Retail & Trade", amount: "", notes: "",
   });
   const [feeForm, setFeeForm] = useState({ mode: "Cash", reference: "", notes: "" });
+
+  // ── Deep-links: /loans?loan=<id> opens the drawer, /loans?apply=true opens the form ──
+  if (typeof window !== "undefined" && !selectedLoanId && deepLinkLoanId === null) {
+    const params = new URLSearchParams(window.location.search);
+    const loanParam = params.get("loan");
+    const applyParam = params.get("apply");
+    if (loanParam) {
+      setDeepLinkLoanId(loanParam);
+      window.history.replaceState({}, "", window.location.pathname);
+    } else if (applyParam === "true" && !showNewForm) {
+      setShowNewForm(true);
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }
 
   const { selectedBranchId } = useBranch();
 
@@ -797,8 +812,8 @@ export default function LoansPage() {
       )}
 
       {/* Loan Detail Drawer */}
-      {selectedLoanId && (
-        <LoanDrawer loanId={selectedLoanId} onClose={() => setSelectedLoanId(null)} permissions={permissions} officerName={officerName} />
+      {(selectedLoanId || deepLinkLoanId) && (
+        <LoanDrawer loanId={selectedLoanId ?? deepLinkLoanId!} onClose={() => { setSelectedLoanId(null); setDeepLinkLoanId(null); }} permissions={permissions} officerName={officerName} />
       )}
     </div>
   );

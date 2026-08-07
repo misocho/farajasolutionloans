@@ -440,10 +440,20 @@ export default function ClientsPage() {
     queryFn: () => fetchClientsApi(selectedBranchId),
   });
 
+  // ── Deep-link: /clients?client=<id> opens the detail drawer ────────────────
+  const [detailClientId, setDetailClientId] = useState<string | null>(null);
+  if (typeof window !== "undefined" && !selectedClient && detailClientId === null) {
+    const param = new URLSearchParams(window.location.search).get("client");
+    if (param) {
+      setDetailClientId(param);
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }
+
   const clientDetailQuery = useQuery({
-    queryKey: ["client-detail", selectedClient?.id],
-    queryFn: () => fetchClientApi(selectedClient!.id),
-    enabled: !!selectedClient,
+    queryKey: ["client-detail", detailClientId],
+    queryFn: () => fetchClientApi(detailClientId!),
+    enabled: !!detailClientId,
   });
   const detailClient = clientDetailQuery.data ?? selectedClient;
 
@@ -1402,7 +1412,7 @@ export default function ClientsPage() {
       )}
 
       {/* ── CLIENT DETAIL DRAWER ───────────────────────────────────────── */}
-      {detailClient && (
+      {(selectedClient || detailClientId) && (
         <div className="fixed inset-0 z-50 flex justify-end bg-zinc-950/40 backdrop-blur-xs animate-fade-in">
           <div className="bg-white dark:bg-zinc-900 border-l border-zinc-200 dark:border-zinc-800 w-full max-w-2xl h-full shadow-2xl overflow-y-auto animate-in slide-in-from-right duration-250">
             <div className="sticky top-0 bg-white dark:bg-zinc-900 border-b border-zinc-100 dark:border-zinc-800 px-5 py-4 flex justify-between items-start z-10">
@@ -1411,11 +1421,11 @@ export default function ClientsPage() {
                   <User className="size-5 text-[#0D44A2]" />
                 </div>
                 <div>
-                  <h3 className="font-black text-zinc-900 dark:text-zinc-50 text-base">{detailClient.name}</h3>
-                  <p className="text-xs font-bold text-zinc-400">Registered {formatDate(detailClient.date_registered)}</p>
+                  <h3 className="font-black text-zinc-900 dark:text-zinc-50 text-base">{detailClient?.name ?? selectedClient?.name ?? "Loading…"}</h3>
+                  <p className="text-xs font-bold text-zinc-400">{detailClient ? `Registered ${formatDate(detailClient.date_registered)}` : "Fetching details…"}</p>
                 </div>
               </div>
-              <button onClick={() => setSelectedClient(null)} className="p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full cursor-pointer">
+              <button onClick={() => { setSelectedClient(null); setDetailClientId(null); }} className="p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full cursor-pointer">
                 <X className="size-5 text-zinc-500" />
               </button>
             </div>
@@ -1438,6 +1448,8 @@ export default function ClientsPage() {
                 </div>
               )}
 
+              {detailClient ? (
+                <>
               {/* Personal */}
               <section className="space-y-2">
                 <p className="text-[#0D44A2] font-black uppercase tracking-wider text-[10px] flex items-center gap-1.5"><Home className="size-3.5" />Personal & Residency</p>
@@ -1636,10 +1648,16 @@ export default function ClientsPage() {
                   </div>
                 </section>
               )}
+                </>
+              ) : (
+                <div className="flex items-center justify-center py-16">
+                  <Loader2 className="animate-spin text-[#0D44A2] size-7" />
+                </div>
+              )}
             </div>
 
             <div className="sticky bottom-0 bg-white dark:bg-zinc-900 border-t border-zinc-100 dark:border-zinc-800 p-4">
-              <Button onClick={() => setSelectedClient(null)} className="w-full bg-[#0D44A2] hover:bg-[#0A3682] text-white rounded-xl h-11 font-semibold">
+              <Button onClick={() => { setSelectedClient(null); setDetailClientId(null); }} className="w-full bg-[#0D44A2] hover:bg-[#0A3682] text-white rounded-xl h-11 font-semibold">
                 Close Profile
               </Button>
             </div>

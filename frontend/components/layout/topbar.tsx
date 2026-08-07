@@ -80,7 +80,7 @@ export function Topbar({ onMenuClick }: TopbarProps) {
     setSearchOpen(false);
     setQuery("");
     setResults([]);
-    router.push(result.type === "client" ? "/clients" : "/loans");
+    router.push(result.type === "client" ? `/clients?client=${result.id}` : `/loans?loan=${result.id}`);
   };
 
   // Get human-readable page name based on route
