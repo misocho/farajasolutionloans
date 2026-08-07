@@ -76,16 +76,16 @@ Before finishing any frontend task: run `pnpm build` and `pnpm lint`. Backend: `
 ## Architecture (where things live)
 
 - Backend entry: `app/main.py` → `app/create_app.py`; routers registered in `app/api/router.py` under `/api/v1`.
-- Routers: `auth`, `admin`, `loans_clients` (clients, loans, installments, repayments, dashboard stats), `branches`, `reports`, `notifications`, `seed`.
+- Routers: `auth`, `admin`, `loans_clients` (clients, loans, installments, repayments, dashboard stats), `branches`, `reports`, `notifications`, `fees`, `seed`.
 - `app/services/` = business logic · `app/models/` = schema · `app/core/` = config/security/permissions/seed data · `app/schemas/` = Pydantic.
 - `app/tasks/` (empty) = future APScheduler jobs · `app/reports/` (empty) = future report layer · `app/storage/s3_service.py` = dev no-op until prod.
 - Frontend pages: `app/(dashboard)/{dashboard,loans,clients,repayments,reports,schedule,branches,users,settings}/page.tsx` (single-file pages, detail views are drawers). Auth: `app/(auth)/{login,accept-invite}`. JWT cookie `faraja_token` via `app/lib/auth.ts`; axios interceptor auto-redirects to `/login?expired=true` on 401.
 
 ## Canonical permissions (`app/core/permissions.py`)
 
-`dashboard.view` · `audit.view` · `branches.{view,manage}` · `clients.{view,create,update,delete}` · `loans.{view,create,approve,reject,disburse,update,writeoff}` · `repayments.{view,record,verify}` · `reports.{view,export}` · `roles.{view,manage}` · `users.{view,create,update,delete}` · `settings.manage` · `expenses.{view,create,approve}` (defined, unused yet).
+`dashboard.view` · `audit.view` · `branches.{view,manage}` · `clients.{view,create,update,delete}` · `loans.{view,create,approve,reject,disburse,update,writeoff}` · `repayments.{view,record,verify}` · `fees.{view,record,verify}` · `reports.{view,export}` · `roles.{view,manage}` · `users.{view,create,update,delete}` · `settings.manage` · `expenses.{view,create,approve}` (defined, unused yet).
 
-Use these exact strings. Known historical violations (do not reintroduce): `clients.edit` → `clients.update`; `repayments.create` → `repayments.record`.
+Use these exact strings. Known historical violations (do not reintroduce): `clients.edit` → `clients.update`; `repayments.create` → `repayments.record`. New `fees.*` permissions require a seed re-run (`app/db/seed.py` is idempotent) to take effect.
 
 ## Business rules quick reference
 
@@ -98,14 +98,18 @@ Use these exact strings. Known historical violations (do not reintroduce): `clie
 - Installments = equal weekly splits of total repayable, generated at disbursement.
 - Loan statuses: `Pending / Approved / Disbursed / Rejected / Closed` (DB). Computed states: Almost Due (2 days before due), Due, Arrears, Past Maturity, Defaulter (past maturity > 1 month), Missed Payment.
 - Payment verification is manual (Manager/Director). M-Pesa is future scope. Locations = Google Maps links.
+- **Application fee (2026-08-07):** collected at loan application, NOT registration. Tiers: 4–10k → KES 800 new / 600 existing; >10k → 1,500 new / 1,000 existing (existing = client with ≥1 disbursed/closed loan). Non-refundable, excluded from the repayment schedule. `POST /loans` refuses applications below KES 4,000 or without a **verified** `fee_payments` row matching the quote; the fee is consumed (linked) by the first loan. Recorder may verify their own record (cash collected at the desk, 2026-08-07). `fee_service.py` = quote/eligibility logic.
 
 ## Known bugs & current work (see PLAN.md)
 
 1. ✅ **Fixed 2026-08-07** — permission mismatches `clients.edit`→`clients.update`, `repayments.create`→`repayments.record` (`loans_clients.py:288`, `:681`). Do not reintroduce.
 2. ✅ **Fixed 2026-08-07** — duplicated admin route block deleted (`admin.py`); duplicate unguarded `GET /branches` removed from `loans_clients.py` (guarded branches.py version now serves).
 3. ✅ **Decision 2026-08-07** — `backend/.env` (real Resend key + SECRET_KEY) is **committed by design** (single team repo). Treat it as sensitive: never log secrets, rotate keys if leaked, never add secrets to any other file.
-4. Notifications read-state is in-memory (resets on restart); frontend mark-read is local-only.
-5. Missing (planned): `POST /auth/complete-profile`, financial report, APScheduler email jobs, PDF service, users-page invite UI, change-password wiring.
+4. ✅ **Fixed 2026-08-07** — permission resolution `ur.role.permissions` raised `AttributeError` (Role has no `permissions` relationship) → 500 on every permission-checked endpoint for authenticated users (notifications, loans, clients, repayments, reports, branches). All routers now use `get_user_permissions(db, user)` from `app/core/permissions.py`; `_require_permission` signature is `(db, user, perm)`.
+5. ✅ **Fixed 2026-08-07** — notification read-state now DB-backed (`notification_reads` + `PATCH /notifications/{id}/read`); `5df95998dc2f` added `PENDING_APPROVAL` to the userstatus enum (invitees could not be inserted); `RESEND_FROM_EMAIL` override in `.env` (key is domain-restricted to `faraja.enkaai.net`).
+6. Missing (planned): `POST /auth/complete-profile`, financial report, APScheduler email jobs, PDF service, change-password wiring.
+7. ✅ **Fixed 2026-08-07** — client registration 500 `AttributeError: 'dict' object has no attribute 'model_dump'`: Pydantic v2 `model_dump()` already serializes nested models to dicts, so `create_client`'s list comprehension crashed on any non-empty dependants/next-of-kin/properties (empty lists passed silently). Fixed: `**request.model_dump()` (`loans_clients.py`).
+8. ✅ **Fixed 2026-08-07** — expired/invalid JWT returned 500 instead of 401 on every authed endpoint: `get_current_user` only caught `AuthenticationError` but jose raises `ValueError`. Fixed: catch both → 401 (`dependencies/auth.py`), so the frontend interceptor redirects to `/login?expired=true`.
 
 ## Boundaries — do not touch without asking
 

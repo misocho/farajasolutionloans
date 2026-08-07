@@ -17,6 +17,10 @@
 | Company section in client form | Pending |
 | Lumpsum product rates | ⚠️ **Still pending** — seeded with 20% placeholder (`app/db/seed.py:301`) |
 | Defaulter definition | Past maturity > 1 month ✅ |
+| Application fee collection point | **At loan application** (2026-08-07) — tier from loan amount + client history; block loan creation until fee paid & verified |
+| Application fee tiers | 4–10k: **800 new / 600 existing** · >10k: **1500 new / 1000 existing** (existing = ≥1 disbursed/closed loan); non-refundable, NOT part of loan schedule; **minimum loan = KES 4,000** |
+| Fee permissions | **Dedicated** `fees.view` / `fees.record` / `fees.verify` (2026-08-07); recorder may verify own record (cash at desk) |
+| Estimated asset value | **Client-level business field** `clients.estimated_asset_value` (2026-08-07) |
 
 ---
 
@@ -36,6 +40,15 @@
 | 6 | Notification read-state is an in-memory dict (resets on restart); frontend mark-read is local state, `PATCH /notifications/read-all` not called | Read state lost on restart | `backend/app/api/routers/notifications.py:35` |
 | 7 | Lumpsum interest rate placeholder `0.20` marked TBD | Wrong pricing | `backend/app/db/seed.py:301` |
 | 8 | Backend root `main.py` is a "Hello from backend!" stub; real entry is `app/main.py`; `health.py` router never registered | Confusion, no /health | `backend/main.py`, `backend/app/api/router.py` |
+| 9 | Notification read-state persisted | ✅ **FIXED 2026-08-07** — `notification_reads` table (migration `2af447094139`) + `PATCH /notifications/{id}/read`; frontend uses server read state | `backend/app/models/notification_read.py` |
+| 10 | User enum missing `PENDING_APPROVAL` (new invitees never inserted) | ✅ **FIXED 2026-08-07** — migration `5df95998dc2f` adds value; applied | `backend/app/models/enums.py` |
+| 11 | Resend key domain-restricted to `faraja.enkaai.net` (403 on `farajasolutions.co.ke` sender) | ✅ **FIXED 2026-08-07** — `RESEND_FROM_EMAIL` override in `.env`; test send verified | `backend/.env` |
+| 12 | Calendar overdue window too narrow (14d) + timezone drift; status case bug | ✅ **FIXED 2026-08-07** — 180d history window; `today_nairobi()`; installment marking on repayment verify | `backend/app/core/time.py` |
+| 13 | Branch form had dead manager fields + free-text code; frontend `branch.location` | ✅ **FIXED 2026-08-07** — code auto-generated; `address` field; interface updated | `backend/app/api/routers/branches.py` |
+| 14 | Client registration 500 when dependants/next-of-kin/properties lists non-empty: `AttributeError: 'dict' object has no attribute 'model_dump'` (Pydantic v2 `model_dump()` already yields dicts) | ✅ **FIXED 2026-08-07** — `**request.model_dump()`; verified full payload incl. lists (201, data intact) | `backend/app/api/routers/loans_clients.py` |
+| 15 | Expired/invalid JWT → 500 on all authed endpoints (`get_current_user` caught only `AuthenticationError`; jose raises `ValueError`) | ✅ **FIXED 2026-08-07** — catch `ValueError` too → 401; verified garbage token = 401 | `backend/app/api/dependencies/auth.py` |
+| 16 | System Admin role had no `loans.*`/`clients.*`/`repayments.*` permissions → loans page 403, no approve button | ✅ **FIXED 2026-08-07** — System Admin now = all `PERMISSIONS` (33); seed re-run applied (idempotent); verified `FS-SYS001` GET /loans 200 + `loans.approve` present | `backend/app/db/seed.py` |
+| 14 | Pending invites stayed visible after approve | ✅ **FIXED 2026-08-07** — users page filters ACTIVE invitees + invalidates `admin-invites` | `frontend/app/(dashboard)/users/page.tsx` |
 
 ---
 
@@ -60,8 +73,8 @@
 |------|----------------|
 | **Director** | All permissions (full access) |
 | **Manager** | All except: `settings.manage`, `users.delete`, `roles.manage`, `loans.writeoff` |
-| **Loan Officer** | dashboard.view, clients.view/create/update, loans.view/create, repayments.view/record |
-| **Finance Officer** | dashboard.view, repayments.view/record, expenses.view/create/approve, reports.view/export |
+| **Loan Officer** | dashboard.view, clients.view/create/update, loans.view/create, repayments.view/record, **fees.view/record** |
+| **Finance Officer** | dashboard.view, repayments.view/record, **fees.view/record/verify**, expenses.view/create/approve, reports.view/export |
 | **System Admin** | dashboard.view, users CRUD, roles.view/manage, branches.view/manage, audit.view |
 | **Auditor** | dashboard.view, clients.view, loans.view, repayments.view, reports.view, audit.view |
 
@@ -74,14 +87,15 @@
 | Auth (login, JWT, /me) | ✅ Real DB | ✅ | JWT cookie, 401 → redirect login |
 | Admin — users/roles/permissions CRUD | ✅ Real DB | ✅ | Directory + permissions matrix |
 | **User invite/onboarding flow** | ✅ Real DB + Resend | ✅ Accept-invite page; ⚠️ invite UI + status mgmt missing on users page | `POST /auth/complete-profile` missing (backend) |
-| Loan products (Faraja 4wk, 5wk, Lumpsum) | ✅ Real DB, 3 seeded | ⚠️ Product dropdown hardcoded, not from `/loan-products` | Lumpsum rate placeholder |
+| Loan products (Faraja 4wk, 5wk, Lumpsum) | ✅ Real DB, 3 seeded | ✅ Product dropdown from `/loan-products` (2026-08-07) | Lumpsum rate placeholder |
 | Client registration (full form with photos, signatures) | ✅ Real DB | ✅ 7-step form with signature pads | Detail drawer uses list data, not `GET /clients/{id}` |
+| **Application fees** | ✅ Real DB (2026-08-07): `fee_payments` table, quote/record/verify endpoints, loan creation gated on verified fee, 4k min, fee income in dashboard+summary | ✅ Loan-apply modal: client+product selects, quote, pay/verify UI, submit blocked until verified | Seed once for new `fees.*` permissions |
 | Loan workflow (pending→approved→disbursed) | ✅ Real DB | ✅ Approve/reject/disburse/close | Status badges: only 5 basic + overdue flag; no Almost Due/Arrears/etc. |
 | Weekly installment schedule | ✅ Generated on disbursement | ✅ Schedule calendar page | |
 | Repayments & penalty calc | ✅ Real DB | ✅ Record/verify | No partial-payment warning |
 | Branches | ✅ Real DB | ✅ CRUD + stats | ⚠️ Duplicate unchecked `/branches` endpoint |
 | Reports (portfolio, arrears, collections, clients, summary) | ✅ Real DB | ✅ 3 tabs | ❌ Financial report (month/year) missing; no branch filter |
-| Notifications (in-app) | ✅ Real DB queries | ✅ 30s polling | ⚠️ Read-state in-memory (resets on restart) |
+| Notifications (in-app) | ✅ Real DB queries | ✅ 30s polling | ✅ Read-state persisted (2026-08-07) |
 | Email notifications (Resend) | ✅ Invite/approve/reset emails | — | ❌ Due/arrears alert jobs (APScheduler) missing |
 | PDF form generation + e-signature | ❌ Not started (reportlab installed) | ❌ No download button | |
 | M-Pesa | ⏳ Future | — | |
@@ -89,12 +103,12 @@
 ### Seeded data
 - **11 branches** (Head Office–Miritini, Mombasa, Kilifi, Malindi, Watamu, Mariakani, Kwale, Ukunda, Lunga Lunga, Voi, Taveta)
 - **6 roles** (Director, Manager, Loan Officer, Finance Officer, System Admin, Auditor) with approval limits
-- **27 permissions** mapped per role
+- **30 permissions** mapped per role (fees.view/record/verify added 2026-08-07 — re-run seed once)
 - **6 users** (seed password `Faraja@2026` — change after first deploy)
 - **3 loan products**: Faraja 4 Weeks (28d, 20%), Faraja 5 Weeks (35d, 30%), Lumpsum (90d, 20% TBD)
 
-### Migrations (9, in `backend/alembic/versions/`)
-`fa926c06d967` initial · `67573e441d71` branches/permissions/roles · `942b9ff118aa` users + join tables · `4e466c97d30b` password_hash→hashed_password · `97551a08382c` no-op · `ac3d7f2d3767` user_invites · `78fd0153f296` loan_products/clients/loans/installments/repayments · `9c48321056f4` photo/signature cols → Text · `a9213f2dd78e` clients.business_photo
+### Migrations (13, in `backend/alembic/versions/`)
+`fa926c06d967` initial · `67573e441d71` branches/permissions/roles · `942b9ff118aa` users + join tables · `4e466c97d30b` password_hash→hashed_password · `97551a08382c` no-op · `ac3d7f2d3767` user_invites · `78fd0153f296` loan_products/clients/loans/installments/repayments · `9c48321056f4` photo/signature cols → Text · `a9213f2dd78e` clients.business_photo · `5df95998dc2f` userstatus + PENDING_APPROVAL · `2af447094139` notification_reads · `56abb241f073` clients.estimated_asset_value · `d3aa1130642d` fee_payments
 
 ### Services & gaps
 - `auth_service.py` (login, lockout after 5 fails) ✅ · `invite_service.py` ✅ · `email_service.py` (Resend) ✅ · `loan_service.py` (interest, penalty 3%/2d, schedule, computed status, workflow) ✅
@@ -209,7 +223,7 @@ Director sends invite (Name + Email + Role + Branch)
 - [x] Loans list + creation modal + detail drawer (`GET /loans/{id}`) + approve/reject/disburse/close actions
 - [x] Installment schedule calendar page
 - [ ] **Client detail drawer uses list-row data** — add `fetchClientApi(id)` in `features/clients/api.ts` + wire `GET /clients/{id}`
-- [ ] **Loan creation form** — client free-text input + hardcoded sectors; should use `GET /loan-products` (product dropdown) + client search
+- [ ] **Loan creation form** — client free-text input + hardcoded sectors; should use `GET /loan-products` (product dropdown) + client search — ✅ **DONE 2026-08-07** (loans page modal: client select, product select, fee quote/pay/verify, submit blocked until verified fee)
 - [ ] **Status badges** — only Pending/Approved/Disbursed/Rejected/Closed + overdue flag; add Almost Due / Due / Arrears / Past Maturity / Defaulter
 - [ ] Location fields — Google Maps link input + preview (currently plain text)
 
@@ -260,8 +274,7 @@ Director sends invite (Name + Email + Role + Branch)
 ### In-App
 - [x] `GET /notifications` — real DB queries (today/tomorrow dues, arrears, unverified repayments, pending approvals, overdue)
 - [x] Frontend polling every 30s + mark-read UI
-- [ ] Notification read-state persisted — currently in-memory dict (resets on restart); needs DB table or accept as-is
-- [ ] Frontend mark-read / mark-all-read wired to backend endpoint (`PATCH /notifications/read-all` exists backend-side; frontend uses local state only)
+- [x] Notification read-state persisted — ✅ **DONE 2026-08-07**: `notification_reads` table + `PATCH /notifications/{id}/read`; frontend reads/writes server state
 
 ### Email Notifications (Resend)
 - [x] `email_service.py` — invite / account-approved / password-reset templates
