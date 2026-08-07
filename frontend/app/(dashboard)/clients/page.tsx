@@ -29,6 +29,7 @@ import {
   GraduationCap,
   BadgeCheck,
   ImageIcon,
+  RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -36,6 +37,7 @@ import { fetchMeApi } from "@/features/auth/api";
 import { useBranch } from "@/components/layout/branch-selector";
 import {
   fetchClientsApi,
+  fetchClientApi,
   createClientApi,
   type Client,
   type NextOfKin,
@@ -437,6 +439,13 @@ export default function ClientsPage() {
     queryKey: ["clients", selectedBranchId],
     queryFn: () => fetchClientsApi(selectedBranchId),
   });
+
+  const clientDetailQuery = useQuery({
+    queryKey: ["client-detail", selectedClient?.id],
+    queryFn: () => fetchClientApi(selectedClient!.id),
+    enabled: !!selectedClient,
+  });
+  const detailClient = clientDetailQuery.data ?? selectedClient;
 
   // ── Step 1: Personal & Residential ─────────────────────────────────────────
   const [personalInfo, setPersonalInfo] = useState({
@@ -1393,7 +1402,7 @@ export default function ClientsPage() {
       )}
 
       {/* ── CLIENT DETAIL DRAWER ───────────────────────────────────────── */}
-      {selectedClient && (
+      {detailClient && (
         <div className="fixed inset-0 z-50 flex justify-end bg-zinc-950/40 backdrop-blur-xs animate-fade-in">
           <div className="bg-white dark:bg-zinc-900 border-l border-zinc-200 dark:border-zinc-800 w-full max-w-2xl h-full shadow-2xl overflow-y-auto animate-in slide-in-from-right duration-250">
             <div className="sticky top-0 bg-white dark:bg-zinc-900 border-b border-zinc-100 dark:border-zinc-800 px-5 py-4 flex justify-between items-start z-10">
@@ -1402,8 +1411,8 @@ export default function ClientsPage() {
                   <User className="size-5 text-[#0D44A2]" />
                 </div>
                 <div>
-                  <h3 className="font-black text-zinc-900 dark:text-zinc-50 text-base">{selectedClient.name}</h3>
-                  <p className="text-xs font-bold text-zinc-400">Registered {formatDate(selectedClient.date_registered)}</p>
+                  <h3 className="font-black text-zinc-900 dark:text-zinc-50 text-base">{detailClient.name}</h3>
+                  <p className="text-xs font-bold text-zinc-400">Registered {formatDate(detailClient.date_registered)}</p>
                 </div>
               </div>
               <button onClick={() => setSelectedClient(null)} className="p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full cursor-pointer">
@@ -1413,19 +1422,35 @@ export default function ClientsPage() {
 
             <div className="p-5 space-y-6 text-xs text-zinc-700 dark:text-zinc-300">
 
+              {clientDetailQuery.isError && (
+                <div className="flex items-center justify-between gap-3 p-3 rounded-xl border border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/40">
+                  <p className="text-amber-800 dark:text-amber-300 font-semibold">
+                    Couldn't refresh client details — showing last loaded data.
+                  </p>
+                  <Button
+                    onClick={() => clientDetailQuery.refetch()}
+                    variant="outline"
+                    size="sm"
+                    className="h-8 shrink-0 rounded-xl border-amber-300 text-amber-800 hover:bg-amber-100 dark:border-amber-800 dark:text-amber-300"
+                  >
+                    <RefreshCw className="size-3 mr-1" /> Retry
+                  </Button>
+                </div>
+              )}
+
               {/* Personal */}
               <section className="space-y-2">
                 <p className="text-[#0D44A2] font-black uppercase tracking-wider text-[10px] flex items-center gap-1.5"><Home className="size-3.5" />Personal & Residency</p>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 bg-zinc-50/40 p-3 rounded-2xl border border-zinc-100 dark:border-zinc-850">
                   {[
-                    ["National ID", selectedClient.id_no],
-                    ["KRA PIN", selectedClient.pin],
-                    ["Phone", selectedClient.phone],
-                    ["Gender / Marital", `${selectedClient.gender} / ${selectedClient.marital_status}`],
-                    ["Occupation", selectedClient.occupation],
-                    ["Accommodation", `${selectedClient.accommodation} (${selectedClient.period_years || "0"} yrs)`],
-                    ["Address", selectedClient.address],
-                    ["Landmark", selectedClient.landmark],
+                    ["National ID", detailClient.id_no],
+                    ["KRA PIN", detailClient.pin],
+                    ["Phone", detailClient.phone],
+                    ["Gender / Marital", `${detailClient.gender} / ${detailClient.marital_status}`],
+                    ["Occupation", detailClient.occupation],
+                    ["Accommodation", `${detailClient.accommodation} (${detailClient.period_years || "0"} yrs)`],
+                    ["Address", detailClient.address],
+                    ["Landmark", detailClient.landmark],
                   ].map(([label, val]) => (
                     <div key={label} className="flex flex-col">
                       <span className="text-[10px] text-zinc-400 font-semibold">{label}</span>
@@ -1436,11 +1461,11 @@ export default function ClientsPage() {
               </section>
 
               {/* Applicant Dependants */}
-              {selectedClient.applicant_dependants && selectedClient.applicant_dependants.length > 0 && (
+              {detailClient.applicant_dependants && detailClient.applicant_dependants.length > 0 && (
                 <section className="space-y-2">
-                  <p className="text-[#0D44A2] font-black uppercase tracking-wider text-[10px] flex items-center gap-1.5"><Users className="size-3.5" />Applicant's Dependants ({selectedClient.applicant_dependants.length})</p>
+                  <p className="text-[#0D44A2] font-black uppercase tracking-wider text-[10px] flex items-center gap-1.5"><Users className="size-3.5" />Applicant's Dependants ({detailClient.applicant_dependants.length})</p>
                   <div className="flex flex-col gap-2">
-                    {selectedClient.applicant_dependants.map((dep, i) => (
+                    {detailClient.applicant_dependants.map((dep, i) => (
                       <div key={i} className="p-3 rounded-xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50/20 flex justify-between">
                         <div>
                           <span className="font-bold text-zinc-900 dark:text-zinc-200">{dep.fullName}</span>
@@ -1463,10 +1488,10 @@ export default function ClientsPage() {
                 <p className="text-[#0D44A2] font-black uppercase tracking-wider text-[10px] flex items-center gap-1.5"><Heart className="size-3.5" />Spouse & Family</p>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 bg-zinc-50/40 p-3 rounded-2xl border border-zinc-100 dark:border-zinc-850">
                   {[
-                    ["Spouse Name", selectedClient.spouse_name],
-                    ["Spouse Phone", selectedClient.spouse_phone],
-                    ["Spouse Occupation", selectedClient.spouse_occupation],
-                    ["Spouse Address", selectedClient.spouse_address],
+                    ["Spouse Name", detailClient.spouse_name],
+                    ["Spouse Phone", detailClient.spouse_phone],
+                    ["Spouse Occupation", detailClient.spouse_occupation],
+                    ["Spouse Address", detailClient.spouse_address],
                   ].map(([label, val]) => (
                     <div key={label} className="flex flex-col">
                       <span className="text-[10px] text-zinc-400 font-semibold">{label}</span>
@@ -1478,11 +1503,11 @@ export default function ClientsPage() {
 
               {/* Next of Kin */}
               <section className="space-y-2">
-                <p className="text-[#0D44A2] font-black uppercase tracking-wider text-[10px] flex items-center gap-1.5"><Users className="size-3.5" />Next of Kin ({selectedClient.next_of_kin_list?.length || 0})</p>
+                <p className="text-[#0D44A2] font-black uppercase tracking-wider text-[10px] flex items-center gap-1.5"><Users className="size-3.5" />Next of Kin ({detailClient.next_of_kin_list?.length || 0})</p>
                 <div className="flex flex-col gap-2">
-                  {(!selectedClient.next_of_kin_list || selectedClient.next_of_kin_list.length === 0) ? (
+                  {(!detailClient.next_of_kin_list || detailClient.next_of_kin_list.length === 0) ? (
                     <span className="text-zinc-400 text-[11px] italic">No next of kin recorded.</span>
-                  ) : selectedClient.next_of_kin_list.map((kin, i) => (
+                  ) : detailClient.next_of_kin_list.map((kin, i) => (
                     <div key={i} className="p-3 rounded-xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50/20">
                       <div className="flex justify-between flex-wrap gap-2">
                         <div>
@@ -1507,12 +1532,12 @@ export default function ClientsPage() {
                 <p className="text-[#0D44A2] font-black uppercase tracking-wider text-[10px] flex items-center gap-1.5"><Briefcase className="size-3.5" />Business Operations</p>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 bg-zinc-50/40 p-3 rounded-2xl border border-zinc-100 dark:border-zinc-850">
                   {[
-                    ["Business Name", selectedClient.business_name],
-                    ["Sector", selectedClient.business_sector_custom || selectedClient.business_type],
-                    ["Years Operating", selectedClient.business_years ? `${selectedClient.business_years} years` : "N/A"],
-                    ["Location", selectedClient.business_location],
-                    ["Landmark", selectedClient.business_landmark],
-                    ["Est. Asset Value", selectedClient.estimated_asset_value ? formatKES(selectedClient.estimated_asset_value) : "N/A"],
+                    ["Business Name", detailClient.business_name],
+                    ["Sector", detailClient.business_sector_custom || detailClient.business_type],
+                    ["Years Operating", detailClient.business_years ? `${detailClient.business_years} years` : "N/A"],
+                    ["Location", detailClient.business_location],
+                    ["Landmark", detailClient.business_landmark],
+                    ["Est. Asset Value", detailClient.estimated_asset_value ? formatKES(detailClient.estimated_asset_value) : "N/A"],
                   ].map(([label, val]) => (
                     <div key={label} className="flex flex-col">
                       <span className="text-[10px] text-zinc-400 font-semibold">{label}</span>
@@ -1526,9 +1551,9 @@ export default function ClientsPage() {
               <section className="space-y-2">
                 <p className="text-[#0D44A2] font-black uppercase tracking-wider text-[10px] flex items-center gap-1.5"><FileSpreadsheet className="size-3.5" />Collateral Properties</p>
                 <div className="flex flex-col gap-2">
-                  {(!selectedClient.properties_list || selectedClient.properties_list.length === 0) ? (
+                  {(!detailClient.properties_list || detailClient.properties_list.length === 0) ? (
                     <span className="text-zinc-400 italic">No collateral registered.</span>
-                  ) : selectedClient.properties_list.map((prop, i) => (
+                  ) : detailClient.properties_list.map((prop, i) => (
                     <div key={i} className="flex justify-between p-3 rounded-xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50/20">
                       <div>
                         <span className="font-bold text-zinc-900 dark:text-zinc-200">{prop.description}</span>
@@ -1552,13 +1577,13 @@ export default function ClientsPage() {
                 <p className="text-[#0D44A2] font-black uppercase tracking-wider text-[10px] flex items-center gap-1.5"><ShieldCheck className="size-3.5" />Guarantor Details</p>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 bg-zinc-50/40 p-3 rounded-2xl border border-zinc-100 dark:border-zinc-850">
                   {[
-                    ["Full Name", `${selectedClient.guarantor_first_name || ""} ${selectedClient.guarantor_middle_name || ""} ${selectedClient.guarantor_surname || ""}`.trim()],
-                    ["ID No.", selectedClient.guarantor_id_no],
-                    ["Phone", selectedClient.guarantor_phone],
-                    ["Relationship", selectedClient.guarantor_relationship],
-                    ["Occupation", selectedClient.guarantor_occupation],
-                    ["Address", selectedClient.guarantor_address],
-                    ["Period Known", selectedClient.guarantor_period_known],
+                    ["Full Name", `${detailClient.guarantor_first_name || ""} ${detailClient.guarantor_middle_name || ""} ${detailClient.guarantor_surname || ""}`.trim()],
+                    ["ID No.", detailClient.guarantor_id_no],
+                    ["Phone", detailClient.guarantor_phone],
+                    ["Relationship", detailClient.guarantor_relationship],
+                    ["Occupation", detailClient.guarantor_occupation],
+                    ["Address", detailClient.guarantor_address],
+                    ["Period Known", detailClient.guarantor_period_known],
                   ].map(([label, val]) => (
                     <div key={label} className="flex flex-col">
                       <span className="text-[10px] text-zinc-400 font-semibold">{label}</span>
@@ -1569,15 +1594,15 @@ export default function ClientsPage() {
               </section>
 
               {/* Documents thumbnails */}
-              {(selectedClient.applicant_id_photo || selectedClient.applicant_passport_photo || selectedClient.guarantor_id_photo || selectedClient.guarantor_passport_photo) && (
+              {(detailClient.applicant_id_photo || detailClient.applicant_passport_photo || detailClient.guarantor_id_photo || detailClient.guarantor_passport_photo) && (
                 <section className="space-y-2">
                   <p className="text-[#0D44A2] font-black uppercase tracking-wider text-[10px] flex items-center gap-1.5"><Camera className="size-3.5" />Uploaded Documents</p>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                     {[
-                      ["Applicant ID", selectedClient.applicant_id_photo],
-                      ["Applicant Passport", selectedClient.applicant_passport_photo],
-                      ["Guarantor ID", selectedClient.guarantor_id_photo],
-                      ["Guarantor Passport", selectedClient.guarantor_passport_photo],
+                      ["Applicant ID", detailClient.applicant_id_photo],
+                      ["Applicant Passport", detailClient.applicant_passport_photo],
+                      ["Guarantor ID", detailClient.guarantor_id_photo],
+                      ["Guarantor Passport", detailClient.guarantor_passport_photo],
                     ].filter(([, src]) => src).map(([label, src]) => (
                       <div key={label} className="space-y-1">
                         <span className="text-[10px] text-zinc-400 font-semibold block">{label}</span>
@@ -1590,22 +1615,22 @@ export default function ClientsPage() {
               )}
 
               {/* Signatures */}
-              {(selectedClient.applicant_signature || selectedClient.guarantor_signature) && (
+              {(detailClient.applicant_signature || detailClient.guarantor_signature) && (
                 <section className="space-y-2">
                   <p className="text-[#0D44A2] font-black uppercase tracking-wider text-[10px] flex items-center gap-1.5"><PenLine className="size-3.5" />Signatures</p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {selectedClient.applicant_signature && (
+                    {detailClient.applicant_signature && (
                       <div className="space-y-1">
                         <span className="text-[10px] text-zinc-400 font-semibold">Applicant Signature</span>
                         {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={selectedClient.applicant_signature} alt="Applicant signature" className="w-full h-20 object-contain rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white" />
+                        <img src={detailClient.applicant_signature} alt="Applicant signature" className="w-full h-20 object-contain rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white" />
                       </div>
                     )}
-                    {selectedClient.guarantor_signature && (
+                    {detailClient.guarantor_signature && (
                       <div className="space-y-1">
                         <span className="text-[10px] text-zinc-400 font-semibold">Guarantor Signature</span>
                         {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={selectedClient.guarantor_signature} alt="Guarantor signature" className="w-full h-20 object-contain rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white" />
+                        <img src={detailClient.guarantor_signature} alt="Guarantor signature" className="w-full h-20 object-contain rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white" />
                       </div>
                     )}
                   </div>

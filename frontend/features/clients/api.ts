@@ -354,6 +354,11 @@ export async function fetchClientsApi(branchId?: string): Promise<Client[]> {
   return res.data;
 }
 
+export async function fetchClientApi(clientId: string): Promise<Client> {
+  const res = await api.get<Client>(`/clients/${clientId}`);
+  return res.data;
+}
+
 export async function createClientApi(data: ClientCreateData): Promise<Client> {
   const res = await api.post<Client>("/clients", data);
   return res.data;

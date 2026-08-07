@@ -292,7 +292,7 @@ def get_clients(
     if cond is not None:
         stmt = stmt.where(cond)
     clients = db.scalars(stmt).all()
-    return [_serialize_client(c) for c in clients]
+    return [_serialize_client(c, include_media=False) for c in clients]
 
 
 @router.get("/clients/{client_id}")
@@ -355,8 +355,8 @@ def update_client(
     return _serialize_client(client)
 
 
-def _serialize_client(c: Client) -> dict:
-    return {
+def _serialize_client(c: Client, include_media: bool = True) -> dict:
+    data = {
         "id": str(c.id),
         "client_number": c.client_number,
         "name": c.name,
@@ -419,6 +419,18 @@ def _serialize_client(c: Client) -> dict:
         "date_registered": c.created_at.isoformat() if c.created_at else None,
         "created_at": c.created_at.isoformat() if c.created_at else None,
     }
+    if not include_media:
+        for key in (
+            "applicant_id_photo",
+            "applicant_passport_photo",
+            "business_photo",
+            "guarantor_id_photo",
+            "guarantor_passport_photo",
+            "applicant_signature",
+            "guarantor_signature",
+        ):
+            data[key] = None
+    return data
 
 
 # ── LOAN PRODUCTS ──────────────────────────────────────────────────────────────
