@@ -38,10 +38,13 @@ router = APIRouter(
 
 def check_is_director(current_user: User = Depends(get_current_user)) -> User:
     user_roles = [ur.role.name for ur in current_user.roles]
-    if "Director" not in user_roles:
+    if "Director" not in user_roles and "System Admin" not in user_roles:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only System Directors are authorized to perform this operation.",
+            detail=(
+                "Only System Directors and System Admins are authorized "
+                "to perform this operation."
+            ),
         )
     return current_user
 

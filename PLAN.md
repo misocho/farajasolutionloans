@@ -45,7 +45,7 @@
 
 ### Phase B2 — User-observed fixes (2026-08-07) · top priority
 
-- [ ] U1 Admin console: permission changes actually take effect — `check_is_director` gate Director|System Admin (frontend already admits both; SysAdmin was silently 403); `updatePermissionsMutation` invalidates `role-permissions-matrix` + `me` (matrix visibly reverted after save); error states on all admin queries (silent empty console); Manage Roles modal verified for both roles
+- [x] U1 Admin console: permission changes actually take effect — `check_is_director` now accepts Director **or** System Admin (frontend already admitted both; SysAdmin was silently 403 — verified `/admin/users` 200 for FS-SYS001, still 403 for LO); `updatePermissionsMutation` invalidates `role-permissions-matrix` + `me` (matrix reverted after save previously); error banner with Retry added for all admin queries; verified live: Director strips `clients.create` from Loan Officer → LO `/auth/me` reflects it instantly (no re-login, JWT carries only `sub`) → restored
 - [ ] U2 User details drawer — `GET /admin/users/{id}` (profile + roles + permissions + branches + status + last login) + "View" action → Sheet in users table (Director/System Admin)
 - [ ] U3 Search deep-links to the record — topbar result click → `/clients?client=<id>` / `/loans?loan=<id>` auto-opens detail drawer/loan sheet (also fixes ignored `/loans?apply=true`)
 - [ ] U4 Profile photo in avatars — `/auth/me` returns `profile_photo` (AuthUser + UserProfile type); sidebar/user-menu/settings avatars render photo via AvatarImage with initials fallback, styling unchanged

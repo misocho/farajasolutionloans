@@ -17,6 +17,7 @@ import {
   Ban,
   BadgeCheck,
   Hourglass,
+  RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -85,29 +86,31 @@ export default function UsersAdminPage() {
   );
 
   // 2. Fetch admin data
-  const { data: users, isLoading: usersLoading } = useQuery({
+  const { data: users, isLoading: usersLoading, isError: usersError } = useQuery({
     queryKey: ["admin-users"],
     queryFn: fetchAdminUsersApi,
     enabled: userIsAdmin,
   });
 
-  const { data: roles, isLoading: rolesLoading } = useQuery({
+  const { data: roles, isLoading: rolesLoading, isError: rolesError } = useQuery({
     queryKey: ["admin-roles"],
     queryFn: fetchAdminRolesApi,
     enabled: userIsAdmin,
   });
 
-  const { data: permissions } = useQuery({
+  const { data: permissions, isError: permissionsError } = useQuery({
     queryKey: ["admin-permissions"],
     queryFn: fetchAdminPermissionsApi,
     enabled: userIsAdmin,
   });
 
-  const { data: invites, isLoading: invitesLoading } = useQuery({
+  const { data: invites, isLoading: invitesLoading, isError: invitesError } = useQuery({
     queryKey: ["admin-invites"],
     queryFn: fetchInvitesApi,
     enabled: userIsAdmin,
   });
+
+  const adminQueryError = usersError || rolesError || permissionsError || invitesError;
 
   const { data: branches } = useQuery({
     queryKey: ["branches-list"],
@@ -150,6 +153,8 @@ export default function UsersAdminPage() {
     mutationFn: ({ roleId, permissionNames }: { roleId: string; permissionNames: string[] }) =>
       updateRolePermissionsApi(roleId, permissionNames),
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["role-permissions-matrix"] });
+      queryClient.invalidateQueries({ queryKey: ["me"] });
       toast.success("Role permissions updated successfully");
     },
     onError: (error: any) => {
@@ -218,7 +223,7 @@ export default function UsersAdminPage() {
           Access Level Denied
         </h2>
         <p className="text-zinc-500 mt-2 text-sm max-w-sm">
-          Administrative directories and system privilege matrix configurations are restricted to **System Directors**.
+          Administrative directories and system privilege matrix configurations are restricted to System Directors and System Admins.
         </p>
         <Button
           onClick={() => window.location.href = "/dashboard"}
@@ -381,6 +386,30 @@ export default function UsersAdminPage() {
           </button>
         </div>
       </div>
+
+      {adminQueryError && (
+        <div className="flex items-center justify-between gap-3 p-4 rounded-2xl border border-rose-200 bg-rose-50 dark:border-rose-900 dark:bg-rose-950/40">
+          <div className="flex items-center gap-2">
+            <ShieldAlert className="size-4 text-rose-500 shrink-0" />
+            <p className="text-xs font-semibold text-rose-800 dark:text-rose-300">
+              Couldn't load the admin console. You may not have access — check with a System Director.
+            </p>
+          </div>
+          <Button
+            onClick={() => {
+              queryClient.invalidateQueries({ queryKey: ["admin-users"] });
+              queryClient.invalidateQueries({ queryKey: ["admin-roles"] });
+              queryClient.invalidateQueries({ queryKey: ["admin-permissions"] });
+              queryClient.invalidateQueries({ queryKey: ["admin-invites"] });
+            }}
+            variant="outline"
+            size="sm"
+            className="h-8 shrink-0 rounded-xl border-rose-300 text-rose-700 hover:bg-rose-100 dark:border-rose-800 dark:text-rose-300"
+          >
+            <RefreshCw className="size-3 mr-1" /> Retry
+          </Button>
+        </div>
+      )}
 
       {/* Directory Tab View */}
       {activeTab === "directory" && (
