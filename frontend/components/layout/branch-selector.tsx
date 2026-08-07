@@ -112,7 +112,7 @@ export function BranchSelector() {
                     <MapPin className="size-3.5 mt-0.5 shrink-0" />
                     <div className="min-w-0">
                       <p className="text-xs font-bold truncate">{branch.name}</p>
-                      <p className="text-[10px] text-zinc-400 truncate">{branch.location}</p>
+                      <p className="text-[10px] text-zinc-400 truncate">{branch.address}</p>
                     </div>
                   </button>
                 ))}

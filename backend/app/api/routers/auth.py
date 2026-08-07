@@ -4,6 +4,7 @@ from app.api.dependencies.auth import (
     get_auth_service,
     get_current_user,
 )
+from app.core.permissions import get_user_permissions
 from app.schemas.auth import (
     AuthUser,
     LoginRequest,
@@ -49,8 +50,23 @@ def login(
 
 
 @router.get("/me", response_model=AuthUser)
-def me(current_user=Depends(get_current_user)):
-    return current_user
+def me(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    role_names = [ur.role.name for ur in current_user.roles]
+    return AuthUser(
+        id=current_user.id,
+        employee_number=current_user.employee_number,
+        email=current_user.email,
+        first_name=current_user.first_name,
+        last_name=current_user.last_name,
+        status=current_user.status,
+        last_login_at=current_user.last_login_at,
+        role=role_names[0] if role_names else None,
+        roles=role_names,
+        permissions=sorted(get_user_permissions(db, current_user)),
+    )
 
 
 @router.post("/accept-invite", response_model=AcceptInviteResponse, status_code=status.HTTP_201_CREATED)

@@ -10,6 +10,7 @@ import {
   Banknote,
   Receipt,
   BarChart3,
+  CalendarDays,
   Settings,
   ShieldCheck,
   LogOut,
@@ -66,8 +67,9 @@ export function Sidebar({ onClose }: SidebarProps) {
 
   const getRole = (u: any): string => {
     if (!u) return "";
-    // Prefer the authoritative roles array from backend
-    if (u.roles && u.roles.length > 0) return u.roles[0].role.name;
+    // Prefer the authoritative role/roles array from backend
+    if (u.role) return u.role;
+    if (u.roles && u.roles.length > 0) return u.roles[0];
     // Fallback pattern matching
     if (u.employee_number?.includes("DIR")) return "Director";
     if (u.employee_number?.includes("SYS")) return "System Admin";
@@ -85,6 +87,7 @@ export function Sidebar({ onClose }: SidebarProps) {
     { name: "Loans", href: "/loans", icon: Banknote },
     { name: "Clients", href: "/clients", icon: Users },
     { name: "Repayments", href: "/repayments", icon: Receipt },
+    { name: "Schedule", href: "/schedule", icon: CalendarDays },
     { name: "Reports", href: "/reports", icon: BarChart3 },
   ];
 

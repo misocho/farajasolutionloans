@@ -33,9 +33,7 @@ function BranchForm({
 }) {
   const [form, setForm] = useState({
     name: initial?.name ?? "",
-    location: initial?.location ?? "",
-    manager_name: initial?.manager_name ?? "",
-    manager_phone: initial?.manager_phone ?? "",
+    address: initial?.address ?? "",
     phone: initial?.phone ?? "",
     email: initial?.email ?? "",
     is_active: initial?.is_active ?? true,
@@ -60,17 +58,9 @@ function BranchForm({
           </div>
           <div className="space-y-1.5">
             <Label className="text-xs font-semibold">Location / Address <span className="text-rose-500">*</span></Label>
-            <Input value={form.location} onChange={e => setForm({...form, location: e.target.value})} placeholder="e.g. Tom Mboya Street, Nairobi CBD" required className="rounded-xl" />
+            <Input value={form.address} onChange={e => setForm({...form, address: e.target.value})} placeholder="e.g. Tom Mboya Street, Nairobi CBD" required className="rounded-xl" />
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <Label className="text-xs font-semibold">Branch Manager</Label>
-              <Input value={form.manager_name} onChange={e => setForm({...form, manager_name: e.target.value})} placeholder="Full name" className="rounded-xl" />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs font-semibold">Manager Phone</Label>
-              <Input value={form.manager_phone} onChange={e => setForm({...form, manager_phone: e.target.value})} placeholder="+254 7XX XXX XXX" className="rounded-xl" />
-            </div>
             <div className="space-y-1.5">
               <Label className="text-xs font-semibold">Branch Phone</Label>
               <Input value={form.phone} onChange={e => setForm({...form, phone: e.target.value})} placeholder="+254 41 XXX XXXX" className="rounded-xl" />
@@ -128,7 +118,7 @@ function BranchCard({ branch, canEdit, onEdit, onDeactivate }: {
               <h3 className="font-black text-zinc-900 dark:text-zinc-100 text-sm sm:text-base truncate">{branch.name}</h3>
               <div className="flex items-center gap-1 mt-0.5">
                 <MapPin className="size-3 text-zinc-400 shrink-0" />
-                <p className="text-[10px] text-zinc-400 truncate">{branch.location}</p>
+                <p className="text-[10px] text-zinc-400 truncate">{branch.address}</p>
               </div>
             </div>
           </div>
@@ -148,11 +138,8 @@ function BranchCard({ branch, canEdit, onEdit, onDeactivate }: {
           </div>
         </div>
 
-        {/* Manager + contact */}
+        {/* Contact */}
         <div className="mt-3 flex flex-wrap gap-3 text-[10px] text-zinc-500">
-          {branch.manager_name && branch.manager_name !== "—" && (
-            <span className="flex items-center gap-1"><Users className="size-3" />{branch.manager_name}</span>
-          )}
           {branch.phone && branch.phone !== "—" && (
             <span className="flex items-center gap-1"><Phone className="size-3" />{branch.phone}</span>
           )}

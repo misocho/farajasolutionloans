@@ -26,3 +26,6 @@ class AuthUser(BaseModel):
     last_name: str
     status: UserStatus
     last_login_at: datetime | None
+    role: str | None = None
+    roles: list[str] = []
+    permissions: list[str] = []

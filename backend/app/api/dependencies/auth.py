@@ -27,7 +27,7 @@ def get_current_user(
 ):
     try:
         return auth_service.current_user(token)
-    except AuthenticationError as exc:
+    except (AuthenticationError, ValueError) as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=str(exc),

@@ -22,6 +22,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.dependencies.auth import get_current_user
+from app.core.permissions import get_user_permissions
 from app.db.session import get_db
 from app.models.branch import Branch
 from app.models.client import Client
@@ -36,8 +37,8 @@ router = APIRouter()
 
 # ── Permission helper ─────────────────────────────────────────────────────────
 
-def _require_permission(user: User, perm: str) -> None:
-    user_perms = {rp.permission.name for ur in user.roles for rp in ur.role.permissions}
+def _require_permission(db: Session, user: User, perm: str) -> None:
+    user_perms = get_user_permissions(db, user)
     if perm not in user_perms:
         raise HTTPException(status_code=403, detail=f"Permission '{perm}' required.")
 
@@ -46,7 +47,7 @@ def _require_permission(user: User, perm: str) -> None:
 
 class BranchCreateRequest(BaseModel):
     name: str
-    code: str
+    code: Optional[str] = None
     address: Optional[str] = None
     phone: Optional[str] = None
     email: Optional[str] = None
@@ -59,6 +60,7 @@ class BranchUpdateRequest(BaseModel):
     phone: Optional[str] = None
     email: Optional[str] = None
     active: Optional[bool] = None
+    is_active: Optional[bool] = None  # frontend alias for active
 
 
 class AssignUserRequest(BaseModel):
@@ -124,6 +126,17 @@ def _serialize_branch(b: Branch, db: Session, include_stats: bool = True) -> dic
     return out
 
 
+def _next_branch_code(db: Session, name: str) -> str:
+    """Auto-generate a unique branch code from the name, e.g. 'MMB' or 'MMB-2'."""
+    base = "".join(w[0] for w in name.split() if w[0].isalpha()).upper()[:4] or "BR"
+    code = base
+    seq = 1
+    while db.scalar(select(Branch).where(Branch.code == code)):
+        seq += 1
+        code = f"{base}-{seq}"
+    return code
+
+
 def _serialize_user(u: User) -> dict:
     role_names = [ur.role.name for ur in u.roles]
     branch_ids = [str(ub.branch_id) for ub in u.branches]
@@ -147,7 +160,7 @@ def get_branches(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _require_permission(current_user, "branches.view")
+    _require_permission(db, current_user, "branches.view")
     branches = db.scalars(select(Branch).order_by(Branch.name)).all()
     return [_serialize_branch(b, db) for b in branches]
 
@@ -158,7 +171,7 @@ def get_branch(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _require_permission(current_user, "branches.view")
+    _require_permission(db, current_user, "branches.view")
     branch = db.scalar(select(Branch).where(Branch.id == branch_id))
     if not branch:
         raise HTTPException(status_code=404, detail="Branch not found")
@@ -171,17 +184,19 @@ def create_branch(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _require_permission(current_user, "branches.manage")
+    _require_permission(db, current_user, "branches.manage")
 
     # Check uniqueness
     if db.scalar(select(Branch).where(Branch.name == request.name)):
         raise HTTPException(status_code=409, detail="A branch with this name already exists.")
-    if db.scalar(select(Branch).where(Branch.code == request.code.upper())):
+
+    code = (request.code or _next_branch_code(db, request.name)).upper()
+    if db.scalar(select(Branch).where(Branch.code == code)):
         raise HTTPException(status_code=409, detail="A branch with this code already exists.")
 
     branch = Branch(
         name=request.name,
-        code=request.code.upper(),
+        code=code,
         address=request.address,
         phone=request.phone,
         email=request.email,
@@ -200,12 +215,14 @@ def update_branch(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _require_permission(current_user, "branches.manage")
+    _require_permission(db, current_user, "branches.manage")
     branch = db.scalar(select(Branch).where(Branch.id == branch_id))
     if not branch:
         raise HTTPException(status_code=404, detail="Branch not found")
 
     data = request.model_dump(exclude_unset=True)
+    if "is_active" in data:
+        data["active"] = data.pop("is_active")
     for k, v in data.items():
         setattr(branch, k, v)
 
@@ -220,7 +237,7 @@ def deactivate_branch(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _require_permission(current_user, "branches.manage")
+    _require_permission(db, current_user, "branches.manage")
     branch = db.scalar(select(Branch).where(Branch.id == branch_id))
     if not branch:
         raise HTTPException(status_code=404, detail="Branch not found")
@@ -237,7 +254,7 @@ def get_branch_users(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _require_permission(current_user, "branches.view")
+    _require_permission(db, current_user, "branches.view")
     branch = db.scalar(select(Branch).where(Branch.id == branch_id))
     if not branch:
         raise HTTPException(status_code=404, detail="Branch not found")
@@ -260,7 +277,7 @@ def assign_user_to_branch(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _require_permission(current_user, "branches.manage")
+    _require_permission(db, current_user, "branches.manage")
 
     branch = db.scalar(select(Branch).where(Branch.id == branch_id))
     if not branch:
@@ -292,7 +309,7 @@ def remove_user_from_branch(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _require_permission(current_user, "branches.manage")
+    _require_permission(db, current_user, "branches.manage")
     ub = db.scalar(
         select(UserBranch).where(
             UserBranch.branch_id == branch_id,

@@ -18,5 +18,7 @@ export interface UserProfile {
   last_login_at: string | null;
   branch?: string;
   role?: string;
+  roles?: string[];
+  permissions?: string[];
 }
 
