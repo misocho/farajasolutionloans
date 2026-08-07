@@ -37,22 +37,32 @@ export function Topbar({ onMenuClick }: TopbarProps) {
 
   // Debounced global search
   useEffect(() => {
+    let cancelled = false;
     const term = query.trim();
-    if (term.length < 2) {
-      setResults([]);
-      setSearching(false);
-      return;
-    }
-    setSearching(true);
     const timer = setTimeout(async () => {
-      try {
-        setResults(await fetchGlobalSearchApi(term));
-      } catch {
+      if (term.length < 2) {
         setResults([]);
+        setSearching(false);
+        return;
       }
-      setSearching(false);
-    }, 300);
-    return () => clearTimeout(timer);
+      setSearching(true);
+      try {
+        const matches = await fetchGlobalSearchApi(term);
+        if (!cancelled) {
+          setResults(matches);
+          setSearching(false);
+        }
+      } catch {
+        if (!cancelled) {
+          setResults([]);
+          setSearching(false);
+        }
+      }
+    }, term.length < 2 ? 0 : 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [query]);
 
   // Close the dropdown on outside click
