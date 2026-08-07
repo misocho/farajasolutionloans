@@ -57,6 +57,17 @@ pnpm lint                                 # eslint
 
 Before finishing any frontend task: run `pnpm build` and `pnpm lint`. Backend: `ruff check`. Fix only issues your change introduced — the repo has pre-existing lint errors (84) and no tests; leave unrelated ones alone unless asked.
 
+## Agent tooling — skills & MCPs (installed 2026-08-07)
+
+Use these when relevant; they are the sanctioned way to fill framework-knowledge gaps and verify UI work.
+
+- **Skills** (`.opencode/skills/frameworks/`, load on demand at the start of relevant work):
+  - `fastapi` — backend conventions: Pydantic v2 schemas, versioned routes, dependency injection, structured logging. Load before backend work in `backend/`.
+  - `nextjs` — frontend conventions: App Router, shadcn/ui primitives, server components, Tailwind tokens, accessibility. Load before frontend work in `frontend/`.
+- **MCPs** (context7 is global in `~/.config/opencode/opencode.jsonc`; playwright is repo-local in `opencode.json`):
+  - `context7` — live library docs (FastAPI, Pydantic, SQLAlchemy, Next.js, React). Consult it instead of guessing version-specific APIs — especially for Next.js 16 breaking changes (complements `frontend/node_modules/next/dist/docs/`).
+  - `playwright` — browser verification of frontend flows. Use for end-to-end checks of UI work (it is the exception to the frontend "no browser" rule, updated 2026-08-07). The human mobile-width (375px) check remains mandatory.
+
 ## Kenya locale & financial rules (non-negotiable)
 
 - **Currency:** Kenyan Shilling (KES). Display with `Intl.NumberFormat("en-KE", { style: "currency", currency: "KES", maximumFractionDigits: 0 })` — never hardcode "KES" strings and never format amounts with bare `.toLocaleString()` without the `en-KE` locale. Dates: `toLocaleDateString("en-KE", ...)`, timezone `Africa/Nairobi` (`settings.DEFAULT_TIMEZONE`).

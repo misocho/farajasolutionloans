@@ -65,7 +65,7 @@ This product is used in the field on phones — **mobile is the primary experien
 4. **Navigation:** sidebar is a drawer on mobile (`components/layout/sidebar.tsx` handles it) — new nav items automatically appear in the drawer; keep labels short.
 5. **Inputs:** use full-width inputs; native `<select>`/`<input type="date">` where mobile keyboards/pickers help; mobile-friendly `captureMode` for camera captures (`clients` page is the reference).
 6. **Gesture patterns:** swipe to change calendar weeks; tap targets must be the primary action — no hover-dependent UI (hover only enhances desktop).
-7. **Verify via the user, not a browser** — never run automated browser checks yourself; after the build/lint pass, ask the user to manually check the calendar week strip, drawers, modals, and tables at mobile width (375px) and end-to-end.
+7. **Verify via Playwright + the user** — after the build/lint pass, use the `playwright` MCP to check flows end-to-end in a browser, then ask the user to manually check the calendar week strip, drawers, modals, and tables at mobile width (375px). The human 375px check is still mandatory — Playwright supplements it, never replaces it.
 
 ### Design hard rules
 
@@ -84,7 +84,12 @@ This product is used in the field on phones — **mobile is the primary experien
 - No `any`, `async/await`, small components, file-local `// ── Section ──` divider comments like existing pages.
 - Reuse `components/ui/*` primitives (button, input, select, sheet, dialog, badge, card...) — don't rebuild them.
 - JWT: cookie `faraja_token` (`app/lib/auth.ts`); layout guards `/dashboard` routes and redirects to `/login?expired=true` on 401.
-- **No self-verification in a browser.** Do NOT launch browsers or automated UI checks. When you finish important UI changes: run `pnpm build` + `pnpm lint`, then ask the user to do a manual end-to-end check (give them the run commands and what to look for).
+- **Browser verification via the `playwright` MCP only.** Use the Playwright MCP (repo `opencode.json`) to verify UI flows end-to-end — but never for money-affecting actions or against production. When you finish important UI changes: run `pnpm build` + `pnpm lint`, verify key flows with Playwright, then ask the user to do a manual end-to-end check (give them the run commands and what to look for).
+
+## Skills & MCPs
+
+- Load the `nextjs` skill (`.opencode/skills/frameworks/nextjs`) at the start of frontend work — it encodes the App Router / shadcn/ui / Tailwind-token conventions this repo follows.
+- Use the `context7` MCP for live Next.js 16 / React docs when unsure about version-specific APIs — it complements `node_modules/next/dist/docs/`, which remains mandatory reading before writing code.
 
 ## Commands
 

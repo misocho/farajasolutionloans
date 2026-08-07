@@ -16,6 +16,11 @@ Backend of the Faraja Solution Loans microfinance system. Read the root `../AGEN
 
 **No test suite exists — do not create tests unless explicitly asked.**
 
+## Skills & MCPs
+
+- Load the `fastapi` skill (`.opencode/skills/frameworks/fastapi`) at the start of backend work — it encodes the Pydantic v2, route-structure, DI, and logging conventions this repo follows.
+- Use the `context7` MCP for live FastAPI/Pydantic/SQLAlchemy docs whenever unsure about a version-specific API (signatures, deprecations, behavior). Don't guess from memory.
+
 ## Architecture — where logic lives
 
 - `app/api/routers/` — endpoints ONLY. Thin: parse request → call service → return schema. No business logic.
