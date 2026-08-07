@@ -16,6 +16,7 @@ export interface UserProfile {
   last_name: string;
   status: string;
   last_login_at: string | null;
+  profile_photo?: string | null;
   branch?: string;
   branches?: string[];
   branch_ids?: string[];

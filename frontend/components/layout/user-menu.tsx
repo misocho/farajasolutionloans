@@ -88,9 +88,14 @@ export function UserMenu() {
         <DropdownMenuTrigger className="focus:outline-none cursor-pointer">
           <div className="flex items-center gap-2.5 p-1 rounded-2xl hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors">
             <Avatar className="size-9 bg-[#0D44A2] text-white">
-              <AvatarFallback className="font-semibold text-sm">
-                {getInitials()}
-              </AvatarFallback>
+              {user.profile_photo ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={user.profile_photo} alt={`${user.first_name} ${user.last_name}`} className="size-full rounded-full object-cover" />
+              ) : (
+                <AvatarFallback className="font-semibold text-sm">
+                  {getInitials()}
+                </AvatarFallback>
+              )}
             </Avatar>
             <div className="hidden md:flex flex-col text-left leading-none">
               <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">

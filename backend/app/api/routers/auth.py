@@ -66,6 +66,7 @@ def me(
         last_name=current_user.last_name,
         status=current_user.status,
         last_login_at=current_user.last_login_at,
+        profile_photo=current_user.profile_photo,
         role=role_names[0] if role_names else None,
         roles=role_names,
         permissions=sorted(get_user_permissions(db, current_user)),

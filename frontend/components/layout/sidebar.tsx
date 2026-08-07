@@ -135,7 +135,12 @@ export function Sidebar({ onClose }: SidebarProps) {
           <div className="bg-zinc-50 dark:bg-zinc-850/50 p-4 rounded-3xl border border-zinc-100 dark:border-zinc-800 shadow-sm flex flex-col gap-3 text-center">
             <div className="flex flex-col items-center gap-2">
               <Avatar className="size-14 border-2 border-primary bg-primary text-white text-lg font-bold">
-                <AvatarFallback>{getInitials()}</AvatarFallback>
+                {user.profile_photo ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={user.profile_photo} alt={`${user.first_name} ${user.last_name}`} className="size-full rounded-full object-cover" />
+                ) : (
+                  <AvatarFallback>{getInitials()}</AvatarFallback>
+                )}
               </Avatar>
               <div className="flex flex-col leading-tight">
                 <span className="font-bold text-zinc-900 dark:text-zinc-50 text-sm">
