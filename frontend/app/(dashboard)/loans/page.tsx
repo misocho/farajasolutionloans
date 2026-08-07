@@ -11,6 +11,7 @@ import {
 import { toast } from "sonner";
 
 import { fetchMeApi } from "@/features/auth/api";
+import { formatKES } from "@/app/lib/format";
 import {
   fetchLoansApi, fetchLoanApi, createLoanApi, approveLoanApi,
   rejectLoanApi, disburseLoanApi, closeLoanApi, fetchClientsApi,
@@ -222,17 +223,17 @@ function LoanDrawer({
             {/* Loan Financials */}
             <div className="bg-zinc-50 dark:bg-zinc-850/30 rounded-2xl border border-zinc-100 dark:border-zinc-800 p-4 space-y-0">
               <p className="text-[10px] font-black text-zinc-500 uppercase tracking-wider mb-2">Financial Summary</p>
-              <MoneyRow label="Principal" value={`KES ${loan.amount.toLocaleString()}`} />
+              <MoneyRow label="Principal" value={formatKES(loan.amount)} />
               {loan.status !== "Pending" && loan.status !== "Approved" && (
-                <MoneyRow label="Interest (20% flat)" value={`KES ${loan.interest_amount.toLocaleString()}`} color="text-[#F57424]" />
+                <MoneyRow label="Interest (20% flat)" value={formatKES(loan.interest_amount)} color="text-[#F57424]" />
               )}
               {loan.status !== "Pending" && loan.status !== "Approved" && (
-                <MoneyRow label="Total Repayable" value={`KES ${loan.total_repayable.toLocaleString()}`} bold />
+                <MoneyRow label="Total Repayable" value={formatKES(loan.total_repayable)} bold />
               )}
-              <MoneyRow label="Amount Repaid (verified)" value={`KES ${loan.amount_repaid.toLocaleString()}`} color="text-emerald-600" />
-              <MoneyRow label="Outstanding Balance" value={`KES ${loan.outstanding.toLocaleString()}`}
+              <MoneyRow label="Amount Repaid (verified)" value={formatKES(loan.amount_repaid)} color="text-emerald-600" />
+              <MoneyRow label="Outstanding Balance" value={formatKES(loan.outstanding)}
                 color={loan.outstanding > 0 ? "text-rose-600" : "text-emerald-600"} bold />
-              <MoneyRow label="Application Fee" value={`KES ${loan.application_fee.toLocaleString()}`} color="text-zinc-400" />
+              <MoneyRow label="Application Fee" value={formatKES(loan.application_fee)} color="text-zinc-400" />
             </div>
 
             {/* Overdue / Penalty */}
@@ -242,7 +243,7 @@ function LoanDrawer({
                   <Flame className="size-3.5" /><span>OVERDUE — {loan.days_overdue} days past due</span>
                 </div>
                 <p className="text-xs text-rose-600 dark:text-rose-400">
-                  Penalty: <strong>KES {loan.penalty_amount.toLocaleString()}</strong>
+                  Penalty: <strong>{formatKES(loan.penalty_amount)}</strong>
                   {" "}(3% × {Math.floor(loan.days_overdue / 2)} periods of 2 days)
                 </p>
               </div>
@@ -278,7 +279,7 @@ function LoanDrawer({
                 {loan.repayments.map((r) => (
                   <div key={r.id} className="flex justify-between items-center p-3 rounded-xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50/30">
                     <div>
-                      <p className="text-xs font-bold text-zinc-800 dark:text-zinc-200">KES {r.amount.toLocaleString()}</p>
+                      <p className="text-xs font-bold text-zinc-800 dark:text-zinc-200">{formatKES(r.amount)}</p>
                       <p className="text-[10px] text-zinc-400">{r.date} · {r.mode} · {r.reference}</p>
                     </div>
                     <span className={`text-[10px] font-bold px-2 py-0.5 rounded-lg border ${
@@ -578,9 +579,9 @@ export default function LoansPage() {
                     </div>
                   </div>
                   <div className="flex justify-between items-center pt-1 border-t border-zinc-100 dark:border-zinc-800">
-                    <span className="text-[10px] text-zinc-400">Principal: KES {loan.amount.toLocaleString()}</span>
+                    <span className="text-[10px] text-zinc-400">Principal: {formatKES(loan.amount)}</span>
                     <span className={`text-xs font-black ${loan.outstanding > 0 ? "text-rose-600" : "text-emerald-600"}`}>
-                      Outstanding: KES {loan.outstanding.toLocaleString()}
+                      Outstanding: {formatKES(loan.outstanding)}
                     </span>
                   </div>
                 </div>
@@ -608,12 +609,12 @@ export default function LoansPage() {
                       <td className="py-3 px-2 font-mono font-bold text-zinc-500 text-[10px]">{loan.loan_number}</td>
                       <td className="py-3 px-2 font-bold text-zinc-900 dark:text-zinc-100">{loan.client}</td>
                       <td className="py-3 px-2 text-zinc-500">{loan.sector}</td>
-                      <td className="py-3 px-2 font-bold text-[#0D44A2] dark:text-blue-400">KES {loan.amount.toLocaleString()}</td>
+                      <td className="py-3 px-2 font-bold text-[#0D44A2] dark:text-blue-400">{formatKES(loan.amount)}</td>
                       <td className="py-3 px-2">
                         <div className="flex items-center gap-1">
                           {loan.is_overdue && <Flame className="size-3 text-rose-500 shrink-0" />}
                           <span className={`font-bold ${loan.outstanding > 0 ? loan.is_overdue ? "text-rose-600" : "text-zinc-700 dark:text-zinc-200" : "text-emerald-600"}`}>
-                            KES {loan.outstanding.toLocaleString()}
+                            {formatKES(loan.outstanding)}
                           </span>
                         </div>
                       </td>
@@ -693,7 +694,7 @@ export default function LoansPage() {
                 <div className="bg-[#0D44A2]/5 border border-[#0D44A2]/15 rounded-xl p-3 text-xs space-y-1">
                   <div className="flex items-center justify-between">
                     <span className="font-semibold text-[#0D44A2]">Application Fee ({quote.tier === "existing" ? "Existing client" : "New client"})</span>
-                    <span className="font-black text-sm text-[#0D44A2]">KES {quote.amount.toLocaleString()}</span>
+                    <span className="font-black text-sm text-[#0D44A2]">{formatKES(quote.amount)}</span>
                   </div>
                   <p className="text-zinc-500 dark:text-zinc-400">Must be paid and verified before the application can be submitted.</p>
                 </div>
@@ -703,7 +704,7 @@ export default function LoansPage() {
               {paidFee && (
                 <div className="bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800 rounded-xl p-3 text-xs flex items-center gap-2 text-emerald-700 dark:text-emerald-400">
                   <CheckCircle2 className="size-4 shrink-0" />
-                  <span><strong>KES {paidFee.amount.toLocaleString()}</strong> fee paid & verified{paidFee.verified_by ? ` by ${paidFee.verified_by}` : ""}.</span>
+                  <span><strong>{formatKES(paidFee.amount)}</strong> fee paid & verified{paidFee.verified_by ? ` by ${paidFee.verified_by}` : ""}.</span>
                 </div>
               )}
 
@@ -711,7 +712,7 @@ export default function LoansPage() {
                 <div className="space-y-3">
                   <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-xl p-3 text-xs text-amber-700 dark:text-amber-400 flex items-center gap-2">
                     <Clock className="size-4 shrink-0" />
-                    <span>Awaiting verified fee payment of <strong>KES {quote.amount.toLocaleString()}</strong>.</span>
+                    <span>Awaiting verified fee payment of <strong>{formatKES(quote.amount)}</strong>.</span>
                   </div>
 
                   {/* Recent fees */}
@@ -720,7 +721,7 @@ export default function LoansPage() {
                       {fees.map((f) => (
                         <div key={f.id} className="flex items-center justify-between border border-zinc-100 dark:border-zinc-800 rounded-xl p-2.5 text-xs">
                           <div className="min-w-0">
-                            <p className="font-bold text-zinc-900 dark:text-zinc-100">KES {f.amount.toLocaleString()} · {f.mode}</p>
+                            <p className="font-bold text-zinc-900 dark:text-zinc-100">{formatKES(f.amount)} · {f.mode}</p>
                             <p className="text-[10px] text-zinc-400 truncate">
                               {f.reference || "No reference"} · recorded by {f.recorded_by || "—"}
                               {f.loan_number ? ` · used on ${f.loan_number}` : ""}
@@ -748,7 +749,7 @@ export default function LoansPage() {
                   {/* Record fee */}
                   {canRecordFee && (
                     <div className="border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 space-y-2.5 bg-zinc-50/50 dark:bg-zinc-900/50">
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Record fee payment — KES {quote.amount.toLocaleString()}</p>
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Record fee payment — {formatKES(quote.amount)}</p>
                       <div className="grid grid-cols-2 gap-2">
                         <select value={feeForm.mode} onChange={e => setFeeForm({...feeForm, mode: e.target.value})}
                           className="h-10 border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 rounded-xl text-xs px-3 focus:outline-none">
