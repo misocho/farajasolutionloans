@@ -20,3 +20,16 @@ export async function acceptInviteApi(data: { token: string; password: string })
   const response = await api.post<AcceptInviteResponse>("/auth/accept-invite", data);
   return response.data;
 }
+
+export interface ChangePasswordResponse {
+  status: string;
+  message: string;
+}
+
+export async function changePasswordApi(data: {
+  current_password: string;
+  new_password: string;
+}): Promise<ChangePasswordResponse> {
+  const response = await api.patch<ChangePasswordResponse>("/auth/change-password", data);
+  return response.data;
+}

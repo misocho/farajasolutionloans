@@ -41,7 +41,7 @@
 
 - [x] B1 Global search in top nav — backend `GET /search?q=` (clients by name/phone/ID, loans by number, branch-scoped) + debounced results dropdown in topbar → click navigates to the right page
 - [x] B2 Branch switcher actually filters — `/auth/me` gains `branch_ids`; `GET /branches` scoped to user's branches (kills manager data leak); `branch_id` params on `GET /clients`, `GET /repayments`, `GET /dashboard/stats`; dashboard/clients/loans/repayments pages pass the selection into their queries
-- [ ] B3 Profile menu wired — My Profile + Permissions dialogs (from `/auth/me`), Settings → `/settings`, Change Password dialog → `PATCH /auth/change-password`
+- [x] B3 Profile menu wired — My Profile + Permissions dialogs (from `/auth/me`), Settings → `/settings`, Change Password dialog → `PATCH /auth/change-password`
 
 ### Phase C — Core workflow close-out (P1–P3) · ~2 weeks
 
