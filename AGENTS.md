@@ -89,7 +89,8 @@ Before finishing any frontend task: run `pnpm build` and `pnpm lint`. Backend: `
 ## Architecture (where things live)
 
 - Backend entry: `app/main.py` → `app/create_app.py`; routers registered in `app/api/router.py` under `/api/v1`.
-- Routers: `auth`, `admin`, `loans_clients` (clients, loans, installments, repayments, dashboard stats), `branches`, `reports`, `notifications`, `fees`, `seed`.
+- Routers: `auth`, `admin`, `loans_clients` (clients, loans, installments, repayments, dashboard stats), `branches`, `reports`, `notifications`, `search`, `fees`, `seed`.
+- Branch scope helper: `get_user_branch_ids(user)` in `app/core/permissions.py` (None = unrestricted; list = scoped; empty = see nothing). Used by clients/loans/repayments/search/branches/dashboard-stats.
 - `app/services/` = business logic · `app/models/` = schema · `app/core/` = config/security/permissions/seed data · `app/schemas/` = Pydantic.
 - `app/tasks/` (empty) = future APScheduler jobs · `app/reports/` (empty) = future report layer · `app/storage/s3_service.py` = dev no-op until prod.
 - Frontend pages: `app/(dashboard)/{dashboard,loans,clients,repayments,reports,schedule,branches,users,settings}/page.tsx` (single-file pages, detail views are drawers). Auth: `app/(auth)/{login,accept-invite}`. JWT cookie `faraja_token` via `app/lib/auth.ts`; axios interceptor auto-redirects to `/login?expired=true` on 401.

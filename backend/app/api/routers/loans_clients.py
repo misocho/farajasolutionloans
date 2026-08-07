@@ -26,7 +26,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.dependencies.auth import get_current_user
-from app.core.permissions import get_user_permissions
+from app.core.permissions import get_user_branch_ids, get_user_permissions
 from app.db.session import get_db
 from app.models.client import Client
 from app.models.enums import LoanStatus, PaymentMode
@@ -49,18 +49,10 @@ def _require_permission(db: Session, user: User, perm: str) -> None:
         raise HTTPException(status_code=403, detail=f"Permission '{perm}' required.")
 
 
-def _get_user_branch_ids(user: User) -> list | None:
-    """
-    Returns None for Directors and System Admins (unrestricted access).
-    Returns a list of branch UUIDs for Loan Officers and Managers.
-    An empty list means no branch assigned — they will see nothing (safer than seeing all).
-    """
-    UNRESTRICTED_ROLES = {"Director", "System Admin", "Auditor"}
-    role_names = {ur.role.name for ur in user.roles}
-    if role_names & UNRESTRICTED_ROLES:
-        return None  # No filter — sees everything
-    # Scoped roles: return their assigned branch IDs
-    return [ub.branch_id for ub in user.branches]
+# ── Branch scoping ──────────────────────────────────────────────────────────────
+
+
+# ── CLIENTS ────────────────────────────────────────────────────────────────────
 
 
 def _enrich_loan(loan: Loan, db: Session) -> dict:
@@ -233,7 +225,7 @@ def get_clients(
     current_user: User = Depends(get_current_user),
 ):
     _require_permission(db, current_user, "clients.view")
-    branch_ids = _get_user_branch_ids(current_user)
+    branch_ids = get_user_branch_ids(current_user)
     stmt = select(Client).order_by(Client.client_number.desc())
     if search:
         stmt = stmt.where(Client.name.ilike(f"%{search}%"))
@@ -398,7 +390,7 @@ def get_loans(
     current_user: User = Depends(get_current_user),
 ):
     _require_permission(db, current_user, "loans.view")
-    branch_ids = _get_user_branch_ids(current_user)
+    branch_ids = get_user_branch_ids(current_user)
     stmt = (
         select(Loan)
         .options(
@@ -662,7 +654,7 @@ def get_repayments(
     current_user: User = Depends(get_current_user),
 ):
     _require_permission(db, current_user, "repayments.view")
-    branch_ids = _get_user_branch_ids(current_user)
+    branch_ids = get_user_branch_ids(current_user)
     stmt = (
         select(Repayment)
         .options(

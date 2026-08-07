@@ -187,8 +187,10 @@ export interface FeePayment {
 
 // ── API Functions ────────────────────────────────────────────────────────────
 
-export async function fetchLoansApi(): Promise<Loan[]> {
-  const res = await api.get<Loan[]>("/loans");
+export async function fetchLoansApi(branchId?: string): Promise<Loan[]> {
+  const res = await api.get<Loan[]>("/loans", {
+    params: { branch_id: branchId || undefined },
+  });
   return res.data;
 }
 
@@ -257,8 +259,12 @@ export async function closeLoanApi(id: string, officer_name?: string): Promise<L
 
 // ── Repayment API ────────────────────────────────────────────────────────────
 
-export async function fetchRepaymentsApi(loan_id?: string): Promise<Repayment[]> {
-  const res = await api.get<Repayment[]>("/repayments", { params: loan_id ? { loan_id } : {} });
+export async function fetchRepaymentsApi(options?: {
+  loan_id?: string;
+  branch_id?: string;
+  verified?: boolean;
+}): Promise<Repayment[]> {
+  const res = await api.get<Repayment[]>("/repayments", { params: options });
   return res.data;
 }
 
@@ -303,8 +309,10 @@ export interface DashboardStats {
   recent_activity: DashboardActivity[];
 }
 
-export async function fetchDashboardStatsApi(): Promise<DashboardStats> {
-  const res = await api.get<DashboardStats>("/dashboard/stats");
+export async function fetchDashboardStatsApi(branchId?: string): Promise<DashboardStats> {
+  const res = await api.get<DashboardStats>("/dashboard/stats", {
+    params: { branch_id: branchId || undefined },
+  });
   return res.data;
 }
 
@@ -332,13 +340,29 @@ export async function fetchClientsReportApi() {
 
 // ── Client API ───────────────────────────────────────────────────────────────
 
-export async function fetchClientsApi(): Promise<Client[]> {
-  const res = await api.get<Client[]>("/clients");
+export async function fetchClientsApi(branchId?: string): Promise<Client[]> {
+  const res = await api.get<Client[]>("/clients", {
+    params: { branch_id: branchId || undefined },
+  });
   return res.data;
 }
 
 export async function createClientApi(data: ClientCreateData): Promise<Client> {
   const res = await api.post<Client>("/clients", data);
+  return res.data;
+}
+
+// ── Global search ─────────────────────────────────────────────────────────────
+
+export interface SearchResult {
+  type: "client" | "loan";
+  id: string;
+  title: string;
+  subtitle: string;
+}
+
+export async function fetchGlobalSearchApi(q: string): Promise<SearchResult[]> {
+  const res = await api.get<SearchResult[]>("/search", { params: { q } });
   return res.data;
 }
 

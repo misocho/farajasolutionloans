@@ -81,3 +81,17 @@ def get_user_permissions(db: Session, user) -> set[str]:
         .where(RolePermission.role_id.in_(role_ids))
     ).all()
     return set(rows)
+
+
+def get_user_branch_ids(user) -> list | None:
+    """Branch scope for a user.
+
+    Returns None for unrestricted roles (Director, System Admin, Auditor).
+    Returns a list of branch UUIDs for scoped roles (Loan Officers, Managers).
+    An empty list means no branch assigned — callers must filter to nothing.
+    """
+    UNRESTRICTED_ROLES = {"Director", "System Admin", "Auditor"}
+    role_names = {ur.role.name for ur in user.roles}
+    if role_names & UNRESTRICTED_ROLES:
+        return None  # No filter — sees everything
+    return [ub.branch_id for ub in user.branches]
