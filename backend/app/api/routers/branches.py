@@ -22,7 +22,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.api.dependencies.auth import get_current_user
-from app.core.permissions import get_user_permissions
+from app.core.permissions import get_user_branch_ids, get_user_permissions
 from app.db.session import get_db
 from app.models.branch import Branch
 from app.models.client import Client
@@ -161,7 +161,12 @@ def get_branches(
     current_user: User = Depends(get_current_user),
 ):
     _require_permission(db, current_user, "branches.view")
-    branches = db.scalars(select(Branch).order_by(Branch.name)).all()
+    stmt = select(Branch).order_by(Branch.name)
+    # Branch scoping: scoped roles (LO/Manager) see only their assigned branches
+    branch_ids = get_user_branch_ids(current_user)
+    if branch_ids is not None:
+        stmt = stmt.where(Branch.id.in_(branch_ids) if branch_ids else False)
+    branches = db.scalars(stmt).all()
     return [_serialize_branch(b, db) for b in branches]
 
 
@@ -175,6 +180,9 @@ def get_branch(
     branch = db.scalar(select(Branch).where(Branch.id == branch_id))
     if not branch:
         raise HTTPException(status_code=404, detail="Branch not found")
+    branch_ids = get_user_branch_ids(current_user)
+    if branch_ids is not None and branch.id not in branch_ids:
+        raise HTTPException(status_code=403, detail="Not allowed to view that branch.")
     return _serialize_branch(branch, db)
 
 

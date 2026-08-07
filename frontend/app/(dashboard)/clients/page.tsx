@@ -33,6 +33,7 @@ import {
 import { toast } from "sonner";
 
 import { fetchMeApi } from "@/features/auth/api";
+import { useBranch } from "@/components/layout/branch-selector";
 import {
   fetchClientsApi,
   createClientApi,
@@ -432,9 +433,10 @@ export default function ClientsPage() {
   const isAuthorized = ["Director", "System Admin", "Loan Officer"].includes(userRole);
 
   // ── Fetch clients ───────────────────────────────────────────────────────────
+  const { selectedBranchId } = useBranch();
   const { data: clients = [], isLoading: clientsLoading } = useQuery({
-    queryKey: ["clients"],
-    queryFn: fetchClientsApi,
+    queryKey: ["clients", selectedBranchId],
+    queryFn: () => fetchClientsApi(selectedBranchId),
   });
 
   // ── Step 1: Personal & Residential ─────────────────────────────────────────

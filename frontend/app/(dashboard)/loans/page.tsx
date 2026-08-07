@@ -11,6 +11,7 @@ import {
 import { toast } from "sonner";
 
 import { fetchMeApi } from "@/features/auth/api";
+import { useBranch } from "@/components/layout/branch-selector";
 import { formatKES } from "@/app/lib/format";
 import {
   fetchLoansApi, fetchLoanApi, createLoanApi, approveLoanApi,
@@ -425,9 +426,17 @@ export default function LoansPage() {
   });
   const [feeForm, setFeeForm] = useState({ mode: "Cash", reference: "", notes: "" });
 
-  const { data: loans = [], isLoading } = useQuery({ queryKey: ["loans"], queryFn: fetchLoansApi });
+  const { selectedBranchId } = useBranch();
 
-  const { data: clients = [] } = useQuery({ queryKey: ["clients"], queryFn: fetchClientsApi });
+  const { data: loans = [], isLoading } = useQuery({
+    queryKey: ["loans", selectedBranchId],
+    queryFn: () => fetchLoansApi(selectedBranchId),
+  });
+
+  const { data: clients = [] } = useQuery({
+    queryKey: ["clients", selectedBranchId],
+    queryFn: () => fetchClientsApi(selectedBranchId),
+  });
 
   const { data: products = [] } = useQuery({ queryKey: ["loan-products"], queryFn: fetchLoanProductsApi });
 

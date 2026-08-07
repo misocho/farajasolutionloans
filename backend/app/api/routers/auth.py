@@ -68,6 +68,7 @@ def me(
         roles=role_names,
         permissions=sorted(get_user_permissions(db, current_user)),
         branches=branch_names,
+        branch_ids=[str(ub.branch_id) for ub in current_user.branches],
     )
 
 

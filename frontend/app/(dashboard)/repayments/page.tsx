@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { AxiosError } from "axios";
 
 import { fetchMeApi } from "@/features/auth/api";
+import { useBranch } from "@/components/layout/branch-selector";
 import {
   fetchRepaymentsApi, createRepaymentApi, verifyRepaymentApi, fetchLoansApi,
   type Repayment,
@@ -297,14 +298,16 @@ export default function RepaymentsPage() {
     loan_id: "", client: "", amount: "", mode: "Cash", reference: "", receipt_photo: "",
   });
 
+  const { selectedBranchId } = useBranch();
+
   const { data: repayments = [], isLoading } = useQuery({
-    queryKey: ["repayments"],
-    queryFn: () => fetchRepaymentsApi(),
+    queryKey: ["repayments", selectedBranchId],
+    queryFn: () => fetchRepaymentsApi({ branch_id: selectedBranchId }),
   });
 
   const { data: loans = [] } = useQuery({
-    queryKey: ["loans"],
-    queryFn: fetchLoansApi,
+    queryKey: ["loans", selectedBranchId],
+    queryFn: () => fetchLoansApi(selectedBranchId),
   });
 
   const disbursedLoans = loans.filter(l => l.status === "Disbursed");

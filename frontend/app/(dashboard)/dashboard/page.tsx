@@ -28,6 +28,7 @@ import {
 
 import { StatCard } from "@/components/dashboard/stat-card";
 import { QuickActions } from "@/components/dashboard/quick-actions";
+import { useBranch } from "@/components/layout/branch-selector";
 import { fetchMeApi } from "@/features/auth/api";
 import {
   fetchLoansApi,
@@ -69,6 +70,7 @@ const monthLabel = (monthKey: string) =>
 
 export default function DashboardPage() {
   const [selectedTab, setSelectedTab] = useState("All");
+  const { selectedBranchId } = useBranch();
 
   const { data: user } = useQuery({
     queryKey: ["me"],
@@ -77,13 +79,13 @@ export default function DashboardPage() {
   });
 
   const { data: loans = [], isLoading: loansLoading } = useQuery({
-    queryKey: ["loans"],
-    queryFn: fetchLoansApi,
+    queryKey: ["loans", selectedBranchId],
+    queryFn: () => fetchLoansApi(selectedBranchId),
   });
 
   const { data: stats, isLoading: statsLoading } = useQuery({
-    queryKey: ["dashboard-stats"],
-    queryFn: fetchDashboardStatsApi,
+    queryKey: ["dashboard-stats", selectedBranchId],
+    queryFn: () => fetchDashboardStatsApi(selectedBranchId),
   });
 
   const getGreeting = () => {

@@ -189,7 +189,7 @@ export interface FeePayment {
 
 export async function fetchLoansApi(branchId?: string): Promise<Loan[]> {
   const res = await api.get<Loan[]>("/loans", {
-    params: { branch_id: branchId || undefined },
+    params: { branch_id: branchId === "all" ? undefined : branchId },
   });
   return res.data;
 }
@@ -264,7 +264,13 @@ export async function fetchRepaymentsApi(options?: {
   branch_id?: string;
   verified?: boolean;
 }): Promise<Repayment[]> {
-  const res = await api.get<Repayment[]>("/repayments", { params: options });
+  const res = await api.get<Repayment[]>("/repayments", {
+    params: {
+      loan_id: options?.loan_id,
+      branch_id: options?.branch_id === "all" ? undefined : options?.branch_id,
+      verified: options?.verified,
+    },
+  });
   return res.data;
 }
 
@@ -311,7 +317,7 @@ export interface DashboardStats {
 
 export async function fetchDashboardStatsApi(branchId?: string): Promise<DashboardStats> {
   const res = await api.get<DashboardStats>("/dashboard/stats", {
-    params: { branch_id: branchId || undefined },
+    params: { branch_id: branchId === "all" ? undefined : branchId },
   });
   return res.data;
 }
@@ -342,7 +348,7 @@ export async function fetchClientsReportApi() {
 
 export async function fetchClientsApi(branchId?: string): Promise<Client[]> {
   const res = await api.get<Client[]>("/clients", {
-    params: { branch_id: branchId || undefined },
+    params: { branch_id: branchId === "all" ? undefined : branchId },
   });
   return res.data;
 }

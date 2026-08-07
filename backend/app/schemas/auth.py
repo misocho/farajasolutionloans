@@ -30,3 +30,4 @@ class AuthUser(BaseModel):
     roles: list[str] = []
     permissions: list[str] = []
     branches: list[str] = []
+    branch_ids: list[str] = []

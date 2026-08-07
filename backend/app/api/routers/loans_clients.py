@@ -52,6 +52,27 @@ def _require_permission(db: Session, user: User, perm: str) -> None:
 # ── Branch scoping ──────────────────────────────────────────────────────────────
 
 
+def _resolve_branch_filter(user: User, branch_id: UUID | None) -> list | None:
+    """Resolve an explicit branch_id against the user's scope.
+
+    Returns None = unrestricted, [] = see nothing, list = allowed branch ids.
+    Raises 403 when the explicit branch is outside the user's scope.
+    """
+    branch_ids = get_user_branch_ids(user)
+    if branch_id is not None:
+        if branch_ids is not None and branch_id not in branch_ids:
+            raise HTTPException(status_code=403, detail="Not allowed to view that branch.")
+        return [branch_id]
+    return branch_ids
+
+
+def _scoped_expr(column, scope: list | None):
+    """SQLAlchemy condition for a resolved branch scope (None = no filter)."""
+    if scope is None:
+        return None
+    return column.in_(scope) if scope else False
+
+
 # ── CLIENTS ────────────────────────────────────────────────────────────────────
 
 
@@ -221,20 +242,19 @@ class RepaymentCreateRequest(BaseModel):
 @router.get("/clients")
 def get_clients(
     search: Optional[str] = Query(None),
+    branch_id: Optional[UUID] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     _require_permission(db, current_user, "clients.view")
-    branch_ids = get_user_branch_ids(current_user)
+    scope = _resolve_branch_filter(current_user, branch_id)
     stmt = select(Client).order_by(Client.client_number.desc())
     if search:
         stmt = stmt.where(Client.name.ilike(f"%{search}%"))
-    # Branch scoping: LOs and Managers see only their branch
-    if branch_ids is not None:
-        if branch_ids:
-            stmt = stmt.where(Client.branch_id.in_(branch_ids))
-        else:
-            stmt = stmt.where(False)  # No branch assigned → see nothing
+    # Branch scoping: LOs and Managers see only their branch(es)
+    cond = _scoped_expr(Client.branch_id, scope)
+    if cond is not None:
+        stmt = stmt.where(cond)
     clients = db.scalars(stmt).all()
     return [_serialize_client(c) for c in clients]
 
@@ -649,12 +669,13 @@ def _load_loan(loan_id: UUID, db: Session) -> Loan:
 @router.get("/repayments")
 def get_repayments(
     loan_id: Optional[UUID] = Query(None),
+    branch_id: Optional[UUID] = Query(None),
     verified: Optional[bool] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     _require_permission(db, current_user, "repayments.view")
-    branch_ids = get_user_branch_ids(current_user)
+    scope = _resolve_branch_filter(current_user, branch_id)
     stmt = (
         select(Repayment)
         .options(
@@ -670,13 +691,9 @@ def get_repayments(
     if verified is not None:
         stmt = stmt.where(Repayment.verified == verified)
     # Branch scoping via the loan's branch
-    if branch_ids is not None:
-        if branch_ids:
-            stmt = stmt.join(Loan, Repayment.loan_id == Loan.id).where(
-                Loan.branch_id.in_(branch_ids)
-            )
-        else:
-            stmt = stmt.where(False)
+    cond = _scoped_expr(Loan.branch_id, scope)
+    if cond is not None:
+        stmt = stmt.join(Loan, Repayment.loan_id == Loan.id).where(cond)
 
     repayments = db.scalars(stmt).unique().all()
     return [_serialize_repayment(r) for r in repayments]
@@ -779,32 +796,71 @@ def _serialize_repayment(r: Repayment) -> dict:
 
 @router.get("/dashboard/stats")
 def get_dashboard_stats(
+    branch_id: Optional[UUID] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     _require_permission(db, current_user, "dashboard.view")
 
+    scope = _resolve_branch_filter(current_user, branch_id)
+    client_cond = _scoped_expr(Client.branch_id, scope)
+    loan_cond = _scoped_expr(Loan.branch_id, scope)
+
     # ── Headline counts ──
-    total_clients = db.scalar(select(func.count()).select_from(Client)) or 0
-    total_loans = db.scalar(select(func.count()).select_from(Loan)) or 0
-    active_loans = db.scalar(select(func.count()).select_from(Loan).where(Loan.status == LoanStatus.DISBURSED)) or 0
-    pending_loans = db.scalar(select(func.count()).select_from(Loan).where(Loan.status == LoanStatus.PENDING)) or 0
+    stmt = select(func.count()).select_from(Client)
+    if client_cond is not None:
+        stmt = stmt.where(client_cond)
+    total_clients = db.scalar(stmt) or 0
 
-    total_disbursed = db.scalar(
-        select(func.coalesce(func.sum(Loan.amount), 0)).where(Loan.status.in_([LoanStatus.DISBURSED, LoanStatus.CLOSED]))
-    ) or Decimal("0")
+    stmt = select(func.count()).select_from(Loan)
+    if loan_cond is not None:
+        stmt = stmt.where(loan_cond)
+    total_loans = db.scalar(stmt) or 0
 
-    total_collected = db.scalar(
-        select(func.coalesce(func.sum(Repayment.amount), 0)).where(Repayment.verified == True)
-    ) or Decimal("0")
+    stmt = select(func.count()).select_from(Loan).where(Loan.status == LoanStatus.DISBURSED)
+    if loan_cond is not None:
+        stmt = stmt.where(loan_cond)
+    active_loans = db.scalar(stmt) or 0
 
-    unverified_repayments = db.scalar(
-        select(func.count()).select_from(Repayment).where(Repayment.verified == False)
-    ) or 0
+    stmt = select(func.count()).select_from(Loan).where(Loan.status == LoanStatus.PENDING)
+    if loan_cond is not None:
+        stmt = stmt.where(loan_cond)
+    pending_loans = db.scalar(stmt) or 0
 
-    fee_income = db.scalar(
-        select(func.coalesce(func.sum(FeePayment.amount), 0)).where(FeePayment.verified == True)
-    ) or Decimal("0")
+    stmt = select(func.coalesce(func.sum(Loan.amount), 0)).where(
+        Loan.status.in_([LoanStatus.DISBURSED, LoanStatus.CLOSED])
+    )
+    if loan_cond is not None:
+        stmt = stmt.where(loan_cond)
+    total_disbursed = db.scalar(stmt) or Decimal("0")
+
+    stmt = (
+        select(func.coalesce(func.sum(Repayment.amount), 0))
+        .join(Loan, Repayment.loan_id == Loan.id)
+        .where(Repayment.verified == True)
+    )
+    if loan_cond is not None:
+        stmt = stmt.where(loan_cond)
+    total_collected = db.scalar(stmt) or Decimal("0")
+
+    stmt = (
+        select(func.count())
+        .select_from(Repayment)
+        .join(Loan, Repayment.loan_id == Loan.id)
+        .where(Repayment.verified == False)
+    )
+    if loan_cond is not None:
+        stmt = stmt.where(loan_cond)
+    unverified_repayments = db.scalar(stmt) or 0
+
+    stmt = (
+        select(func.coalesce(func.sum(FeePayment.amount), 0))
+        .join(Client, FeePayment.client_id == Client.id)
+        .where(FeePayment.verified == True)
+    )
+    if client_cond is not None:
+        stmt = stmt.where(client_cond)
+    fee_income = db.scalar(stmt) or Decimal("0")
 
     # ── Monthly series (last 6 months, including current) ──
     now = datetime.now(timezone.utc)
@@ -812,13 +868,16 @@ def get_dashboard_stats(
     months = [f"{idx // 12:04d}-{idx % 12 + 1:02d}" for idx in range(cur_idx - 5, cur_idx + 1)]
     series_start = datetime.strptime(months[0] + "-01", "%Y-%m-%d")
 
-    def _month_map(column, amount_column, stmt_extra, start) -> dict:
+    def _month_map(column, amount_column, stmt_extra, start, joins=None, branch_column=None):
         month_expr = func.to_char(column, "YYYY-MM")
-        rows = db.execute(
-            select(month_expr, func.coalesce(func.sum(amount_column), 0))
-            .where(stmt_extra, column >= start)
-            .group_by(month_expr)
-        ).all()
+        stmt = select(month_expr, func.coalesce(func.sum(amount_column), 0))
+        if joins is not None:
+            stmt = stmt.join(*joins)
+        conds = [stmt_extra, column >= start]
+        if scope is not None:
+            conds.append(branch_column.in_(scope) if scope else False)
+        stmt = stmt.where(*conds).group_by(month_expr)
+        rows = db.execute(stmt).all()
         return {m: float(v) for m, v in rows}
 
     disbursed_rows = _month_map(
@@ -826,18 +885,23 @@ def get_dashboard_stats(
         Loan.amount,
         Loan.status.in_([LoanStatus.DISBURSED, LoanStatus.CLOSED]),
         series_start,
+        branch_column=Loan.branch_id,
     )
     collected_rows = _month_map(
         Repayment.date,
         Repayment.amount,
         Repayment.verified == True,
         series_start,
+        joins=(Loan, Repayment.loan_id == Loan.id),
+        branch_column=Loan.branch_id,
     )
     fee_rows = _month_map(
         FeePayment.created_at,
         FeePayment.amount,
         FeePayment.verified == True,
         series_start,
+        joins=(Client, FeePayment.client_id == Client.id),
+        branch_column=Client.branch_id,
     )
 
     monthly_series = [
@@ -854,14 +918,18 @@ def get_dashboard_stats(
     collected_month = collected_rows.get(months[-1], 0)
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     prev_month_start = datetime.strptime(months[-2] + "-01", "%Y-%m-%d")
-    clients_month = db.scalar(
-        select(func.count()).select_from(Client).where(Client.created_at >= month_start)
-    ) or 0
-    clients_prev_month = db.scalar(
+    stmt = select(func.count()).select_from(Client).where(Client.created_at >= month_start)
+    if client_cond is not None:
+        stmt = stmt.where(client_cond)
+    clients_month = db.scalar(stmt) or 0
+    stmt = (
         select(func.count())
         .select_from(Client)
         .where(Client.created_at >= prev_month_start, Client.created_at < month_start)
-    ) or 0
+    )
+    if client_cond is not None:
+        stmt = stmt.where(client_cond)
+    clients_prev_month = db.scalar(stmt) or 0
 
     def _pct(cur: float, prev: float) -> float | None:
         if prev <= 0:
@@ -875,14 +943,21 @@ def get_dashboard_stats(
     }
 
     # ── Portfolio quality (disbursed loans, schedule-aware) ──
-    loans = db.scalars(select(Loan).where(Loan.status == LoanStatus.DISBURSED)).all()
+    stmt = select(Loan).where(Loan.status == LoanStatus.DISBURSED)
+    if loan_cond is not None:
+        stmt = stmt.where(loan_cond)
+    loans = db.scalars(stmt).all()
+    stmt = (
+        select(Repayment.loan_id, func.coalesce(func.sum(Repayment.amount), 0))
+        .join(Loan, Repayment.loan_id == Loan.id)
+        .where(Repayment.verified == True)
+        .group_by(Repayment.loan_id)
+    )
+    if loan_cond is not None:
+        stmt = stmt.where(loan_cond)
     repaid_map = {
         loan_id: float(amount)
-        for loan_id, amount in db.execute(
-            select(Repayment.loan_id, func.coalesce(func.sum(Repayment.amount), 0))
-            .where(Repayment.verified == True)
-            .group_by(Repayment.loan_id)
-        ).all()
+        for loan_id, amount in db.execute(stmt).all()
     }
 
     arrears_count = 0
@@ -900,29 +975,39 @@ def get_dashboard_stats(
             overdue_count += 1
 
     # ── Recent activity feed (latest 8 across modules) ──
-    recent_repayments = db.execute(
+    stmt = (
         select(Repayment, Loan.loan_number, Client.name)
         .join(Loan, Repayment.loan_id == Loan.id)
         .join(Client, Repayment.client_id == Client.id)
         .order_by(Repayment.date.desc())
         .limit(8)
-    ).all()
-    recent_loans = db.execute(
+    )
+    if loan_cond is not None:
+        stmt = stmt.where(loan_cond)
+    recent_repayments = db.execute(stmt).all()
+    stmt = (
         select(Loan, Client.name)
         .join(Client, Loan.client_id == Client.id)
         .where(Loan.date_submitted.isnot(None))
         .order_by(Loan.date_submitted.desc())
         .limit(8)
-    ).all()
-    recent_clients = db.scalars(
-        select(Client).order_by(Client.created_at.desc()).limit(8)
-    ).all()
-    recent_fees = db.execute(
+    )
+    if loan_cond is not None:
+        stmt = stmt.where(loan_cond)
+    recent_loans = db.execute(stmt).all()
+    stmt = select(Client).order_by(Client.created_at.desc()).limit(8)
+    if client_cond is not None:
+        stmt = stmt.where(client_cond)
+    recent_clients = db.scalars(stmt).all()
+    stmt = (
         select(FeePayment, Client.name)
         .join(Client, FeePayment.client_id == Client.id)
         .order_by(FeePayment.created_at.desc())
         .limit(8)
-    ).all()
+    )
+    if client_cond is not None:
+        stmt = stmt.where(client_cond)
+    recent_fees = db.execute(stmt).all()
 
     events: list[dict] = []
     for r, loan_number, client_name in recent_repayments:

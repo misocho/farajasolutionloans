@@ -1,9 +1,10 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, { createContext, useContext, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { MapPin, ChevronDown, Loader2 } from "lucide-react";
+import { MapPin, ChevronDown } from "lucide-react";
 import { fetchBranchesApi, type Branch } from "@/features/clients/api";
+import { fetchMeApi } from "@/features/auth/api";
 
 // ── Branch Context — shared across the entire app ─────────────────────────────
 
@@ -29,13 +30,31 @@ export function BranchProvider({ children }: { children: React.ReactNode }) {
     return "all";
   });
 
+  const { data: me } = useQuery({
+    queryKey: ["me"],
+    queryFn: fetchMeApi,
+    staleTime: Infinity,
+  });
+
   const { data: branches = [] } = useQuery({
     queryKey: ["branches"],
     queryFn: fetchBranchesApi,
     staleTime: 5 * 60 * 1000,
   });
 
-  const selectedBranch = branches.find(b => b.id === selectedBranchId) ?? null;
+  // Scoped users (LO/Manager) see only their assigned branches
+  const visibleBranches =
+    me?.branch_ids && me.branch_ids.length > 0
+      ? branches.filter(b => me.branch_ids?.includes(b.id) && b.is_active)
+      : branches.filter(b => b.is_active);
+
+  // Sanitize the persisted selection against the visible branches (derived, no side effects)
+  const effectiveBranchId =
+    selectedBranchId !== "all" && !visibleBranches.some(b => b.id === selectedBranchId)
+      ? "all"
+      : selectedBranchId;
+
+  const selectedBranch = visibleBranches.find(b => b.id === effectiveBranchId) ?? null;
 
   const setSelectedBranchId = (id: string) => {
     setSelectedBranchIdState(id);
@@ -45,7 +64,7 @@ export function BranchProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <BranchContext.Provider value={{ selectedBranchId, setSelectedBranchId, selectedBranch, branches }}>
+    <BranchContext.Provider value={{ selectedBranchId: effectiveBranchId, setSelectedBranchId, selectedBranch, branches: visibleBranches }}>
       {children}
     </BranchContext.Provider>
   );
