@@ -32,6 +32,10 @@ class PaymentMode(StrEnum):
     OTHER = "Other"
 
 
+class FeeType(StrEnum):
+    APPLICATION = "Application"
+
+
 class LoanProductType(StrEnum):
     FARAJA_4_WEEKS = "Faraja4Weeks"
     FARAJA_5_WEEKS = "Faraja5Weeks"

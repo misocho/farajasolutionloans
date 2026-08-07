@@ -28,8 +28,6 @@ import {
   PenLine,
   GraduationCap,
   BadgeCheck,
-  Receipt,
-  Info,
   ImageIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -42,12 +40,12 @@ import {
   type NextOfKin,
   type PropertyItem,
   type Dependant,
-  CLIENT_REGISTRATION_FEE,
   LOAN_APPLICATION_FEE,
 } from "@/features/clients/api";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { formatKES, formatDate } from "@/app/lib/format";
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -421,7 +419,8 @@ export default function ClientsPage() {
 
   const getRole = (user: any) => {
     if (!user) return "";
-    if (user.roles && user.roles.length > 0) return user.roles[0].role.name;
+    if (user.role) return user.role;
+    if (user.roles && user.roles.length > 0) return user.roles[0];
     if (user.employee_number?.includes("DIR")) return "Director";
     if (user.employee_number?.includes("SYS")) return "System Admin";
     if (user.employee_number?.includes("LO")) return "Loan Officer";
@@ -525,6 +524,7 @@ export default function ClientsPage() {
     landmark: "",
     yearsOfOperation: "",
     location: "",
+    estimatedAssetValue: "",
   });
 
   // ── Step 6: Collateral & Guarantor ─────────────────────────────────────────
@@ -556,9 +556,7 @@ export default function ClientsPage() {
     occupation: "",
   });
 
-  // ── Step 7: Documents & Fee Bracket ──────────────────────────────────────────
-  const [loanBracket, setLoanBracket] = useState<"4-10k" | "above10k">("4-10k");
-  const currentAppFee = loanBracket === "4-10k" ? 800 : 1500;
+  // ── Step 7: Documents ────────────────────────────────────────────────────────
 
   const [applicantIdPhoto, setApplicantIdPhoto] = useState("");
   const [applicantPassportPhoto, setApplicantPassportPhoto] = useState("");
@@ -682,6 +680,9 @@ export default function ClientsPage() {
       business_landmark: businessDetails.landmark || undefined,
       business_years: businessDetails.yearsOfOperation || undefined,
       business_location: businessDetails.location || undefined,
+      estimated_asset_value: businessDetails.estimatedAssetValue
+        ? Number(businessDetails.estimatedAssetValue)
+        : undefined,
 
       guarantor_surname: guarantorDetails.surname || undefined,
       guarantor_first_name: guarantorDetails.firstName || undefined,
@@ -701,9 +702,6 @@ export default function ClientsPage() {
       guarantor_passport_photo: guarantorPassportPhoto || undefined,
       applicant_signature: applicantSignature || undefined,
       guarantor_signature: guarantorSignature || undefined,
-
-      registration_fee: CLIENT_REGISTRATION_FEE,
-      application_fee: currentAppFee,
     });
   };
 
@@ -717,7 +715,7 @@ export default function ClientsPage() {
     setSpouseInfo({ fullName: "", idNo: "", phone: "", occupation: "", address: "" });
     setSpouseDependants([]);
     setNextOfKinList([{ fullName: "", relationship: "", phone: "", address: "", idNo: "", occupation: "" }]);
-    setBusinessDetails({ name: "", type: "Retail & Trade", customSector: "", landmark: "", yearsOfOperation: "", location: "" });
+    setBusinessDetails({ name: "", type: "Retail & Trade", customSector: "", landmark: "", yearsOfOperation: "", location: "", estimatedAssetValue: "" });
     setProperties([{ description: "", makeModel: "", serialNo: "", estValue: "" }]);
     setGuarantorDetails({ surname: "", firstName: "", middleName: "", idNo: "", periodKnown: "", relationship: "", phone: "", address: "", occupation: "" });
     setApplicantIdPhoto("");
@@ -820,7 +818,6 @@ export default function ClientsPage() {
               <table className="w-full text-xs text-left border-collapse">
                 <thead>
                   <tr className="border-b border-zinc-100 dark:border-zinc-850 text-zinc-400 font-bold uppercase tracking-wider text-[10px]">
-                    <th className="py-3 px-3">Client ID</th>
                     <th className="py-3 px-3">Full Name</th>
                     <th className="py-3 px-3">Phone</th>
                     <th className="py-3 px-3">Sector</th>
@@ -831,14 +828,13 @@ export default function ClientsPage() {
                 <tbody className="divide-y divide-zinc-100/50 dark:divide-zinc-850/50">
                   {filteredClients.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="py-12 text-center text-zinc-400">
+                      <td colSpan={5} className="py-12 text-center text-zinc-400">
                         No clients found.
                       </td>
                     </tr>
                   ) : (
                     filteredClients.map((client) => (
                       <tr key={client.id} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-850/10 transition-colors">
-                        <td className="py-4 px-3 font-mono font-bold text-zinc-700 dark:text-zinc-350">{client.id}</td>
                         <td className="py-4 px-3 font-bold text-zinc-950 dark:text-zinc-100">{client.name}</td>
                         <td className="py-4 px-3 text-zinc-500 dark:text-zinc-400">{client.phone}</td>
                         <td className="py-4 px-3">
@@ -846,7 +842,7 @@ export default function ClientsPage() {
                             {client.business_type || "Retail"}
                           </span>
                         </td>
-                        <td className="py-4 px-3 text-zinc-500 dark:text-zinc-400">{client.date_registered}</td>
+                        <td className="py-4 px-3 text-zinc-500 dark:text-zinc-400">{formatDate(client.date_registered)}</td>
                         <td className="py-4 px-3 text-right">
                           <Button onClick={() => setSelectedClient(client)} variant="outline" size="sm" className="rounded-xl border-zinc-200 text-zinc-700 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 h-8 flex items-center gap-1 cursor-pointer">
                             <Eye className="size-3.5" />
@@ -1158,6 +1154,17 @@ export default function ClientsPage() {
                       <Label className="text-xs font-semibold">Physical Business Location / Address <span className="text-rose-500">*</span></Label>
                       <Input value={businessDetails.location} onChange={(e) => setBusinessDetails({ ...businessDetails, location: e.target.value })} placeholder="Shop road, building, town" required />
                     </div>
+                    <div className="sm:col-span-2 space-y-1">
+                      <Label className="text-xs font-semibold">Estimated Asset Value (KES)</Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        value={businessDetails.estimatedAssetValue}
+                        onChange={(e) => setBusinessDetails({ ...businessDetails, estimatedAssetValue: e.target.value })}
+                        placeholder="e.g. 250000"
+                      />
+                      <p className="text-[10px] text-zinc-400">Approximate total value of the business's assets.</p>
+                    </div>
                   </div>
                 </div>
               )}
@@ -1259,41 +1266,6 @@ export default function ClientsPage() {
                     <span>Documents, Photos & Signatures</span>
                   </div>
 
-                  {/* Fee Summary */}
-                  <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 rounded-2xl p-4 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400 font-bold text-xs">
-                        <Receipt className="size-3.5" />
-                        <span>Fee Summary — Manual Verification</span>
-                      </div>
-                      <select
-                        value={loanBracket}
-                        onChange={(e) => setLoanBracket(e.target.value as "4-10k" | "above10k")}
-                        className="bg-white dark:bg-zinc-900 border border-amber-200 dark:border-amber-800 rounded-lg text-[11px] font-bold px-2 py-0.5 text-amber-900 dark:text-amber-200"
-                      >
-                        <option value="4-10k">Loan 4K - 10K (Fee: KES 800)</option>
-                        <option value="above10k">Loan &gt; 10K (Fee: KES 1,500)</option>
-                      </select>
-                    </div>
-                    <div className="flex justify-between text-xs">
-                      <span className="text-amber-700/80 dark:text-amber-400/80">Client Registration Fee</span>
-                      <span className="font-black text-amber-800 dark:text-amber-300">KES {CLIENT_REGISTRATION_FEE.toLocaleString()}</span>
-                    </div>
-                    <div className="flex justify-between text-xs border-t border-amber-200 dark:border-amber-800 pt-1.5">
-                      <span className="text-amber-700/80 dark:text-amber-400/80">Loan Application Fee (New Client)</span>
-                      <span className="font-black text-amber-800 dark:text-amber-300">KES {currentAppFee.toLocaleString()}</span>
-                    </div>
-                    <div className="flex justify-between text-xs border-t border-amber-300 dark:border-amber-700 pt-1.5">
-                      <span className="font-bold text-amber-800 dark:text-amber-300">Total Fees</span>
-                      <span className="font-black text-amber-900 dark:text-amber-200">KES {(CLIENT_REGISTRATION_FEE + currentAppFee).toLocaleString()}</span>
-                    </div>
-                    <p className="text-[10px] text-amber-600/80 dark:text-amber-500 flex items-center gap-1 mt-1">
-                      <Info className="size-3 shrink-0" />
-                      Fees are collected manually by the Loan Officer. Not paid through this system.
-                    </p>
-                  </div>
-
-
                   {/* Applicant Photos */}
                   <div className="space-y-3">
                     <span className="text-xs font-bold text-zinc-900 dark:text-zinc-50 flex items-center gap-1.5">
@@ -1381,15 +1353,6 @@ export default function ClientsPage() {
           <p className="text-zinc-500 mt-2 text-sm">
             {personalInfo.fullName} has been successfully registered with full documentation, signatures, and collateral records.
           </p>
-          <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/30 rounded-2xl p-3 mt-6 w-full text-left">
-            <p className="text-xs font-bold text-amber-800 dark:text-amber-300">
-              Fees to collect manually:
-            </p>
-            <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">
-              Registration: KES {CLIENT_REGISTRATION_FEE.toLocaleString()} + Application: KES {currentAppFee.toLocaleString()} = <strong>KES {(CLIENT_REGISTRATION_FEE + currentAppFee).toLocaleString()}</strong>
-            </p>
-
-          </div>
           <div className="flex gap-4 mt-6 w-full">
             <Button onClick={resetForm} className="flex-1 border border-zinc-200 text-zinc-700 dark:border-zinc-800 dark:text-zinc-300 hover:bg-zinc-50 h-10 rounded-xl">
               Register Another
@@ -1412,7 +1375,7 @@ export default function ClientsPage() {
                 </div>
                 <div>
                   <h3 className="font-black text-zinc-900 dark:text-zinc-50 text-base">{selectedClient.name}</h3>
-                  <p className="text-xs font-mono font-bold text-zinc-400">{selectedClient.id} • {selectedClient.date_registered}</p>
+                  <p className="text-xs font-bold text-zinc-400">Registered {formatDate(selectedClient.date_registered)}</p>
                 </div>
               </div>
               <button onClick={() => setSelectedClient(null)} className="p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full cursor-pointer">
@@ -1521,6 +1484,7 @@ export default function ClientsPage() {
                     ["Years Operating", selectedClient.business_years ? `${selectedClient.business_years} years` : "N/A"],
                     ["Location", selectedClient.business_location],
                     ["Landmark", selectedClient.business_landmark],
+                    ["Est. Asset Value", selectedClient.estimated_asset_value ? formatKES(selectedClient.estimated_asset_value) : "N/A"],
                   ].map(([label, val]) => (
                     <div key={label} className="flex flex-col">
                       <span className="text-[10px] text-zinc-400 font-semibold">{label}</span>
@@ -1616,23 +1580,6 @@ export default function ClientsPage() {
                         <img src={selectedClient.guarantor_signature} alt="Guarantor signature" className="w-full h-20 object-contain rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white" />
                       </div>
                     )}
-                  </div>
-                </section>
-              )}
-
-              {/* Fees */}
-              {(selectedClient.registration_fee || selectedClient.application_fee) && (
-                <section className="space-y-2">
-                  <p className="text-[#0D44A2] font-black uppercase tracking-wider text-[10px] flex items-center gap-1.5"><Receipt className="size-3.5" />Fee Record</p>
-                  <div className="grid grid-cols-2 gap-3 bg-amber-50/60 dark:bg-amber-950/10 p-3 rounded-2xl border border-amber-100 dark:border-amber-900/30">
-                    <div className="flex flex-col">
-                      <span className="text-[10px] text-zinc-400 font-semibold">Registration Fee</span>
-                      <span className="font-bold text-amber-700 dark:text-amber-400">KES {selectedClient.registration_fee?.toLocaleString() || "N/A"}</span>
-                    </div>
-                    <div className="flex flex-col">
-                      <span className="text-[10px] text-zinc-400 font-semibold">Application Fee</span>
-                      <span className="font-bold text-amber-700 dark:text-amber-400">KES {selectedClient.application_fee?.toLocaleString() || "N/A"}</span>
-                    </div>
                   </div>
                 </section>
               )}
