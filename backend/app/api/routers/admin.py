@@ -25,6 +25,7 @@ from app.schemas.users import (
 )
 from app.services import invite_service
 from app.services.email_service import send_account_approved_email, send_password_reset_email
+from app.services.invite_service import InviteError
 import secrets
 
 router = APIRouter(
@@ -67,15 +68,18 @@ def invite_user(
     db: Session = Depends(get_db),
     admin_user: User = Depends(check_is_director),
 ):
-    invite = invite_service.create_invite(
-        db=db,
-        email=str(request.email),
-        first_name=request.first_name,
-        last_name=request.last_name,
-        role_name=request.role_name,
-        branch_id=request.branch_id,
-        invited_by=admin_user,
-    )
+    try:
+        invite = invite_service.create_invite(
+            db=db,
+            email=str(request.email),
+            first_name=request.first_name,
+            last_name=request.last_name,
+            role_name=request.role_name,
+            branch_id=request.branch_id,
+            invited_by=admin_user,
+        )
+    except InviteError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     db.commit()
     db.refresh(invite)
     return invite

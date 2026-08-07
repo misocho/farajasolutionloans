@@ -61,6 +61,13 @@ def create_invite(
     invited_by: User,
 ) -> UserInvite:
     """Create an invite record and send the email."""
+    email = email.strip().lower()
+
+    # Block re-invite when an account already exists for this email
+    existing_user = db.scalar(select(User).where(User.email == email))
+    if existing_user:
+        raise InviteError("An account with this email already exists.")
+
     # Check for existing pending invite for same email
     existing = db.scalar(
         select(UserInvite).where(
@@ -130,7 +137,7 @@ def accept_invite(db: Session, token: str, password: str) -> User:
 
     # Check email not already registered
     existing_user = db.scalar(
-        select(User).where(User.email == invite.email)
+        select(User).where(User.email == invite.email.strip().lower())
     )
     if existing_user:
         raise InviteError("An account with this email already exists.")
