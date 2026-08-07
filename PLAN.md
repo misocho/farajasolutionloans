@@ -43,6 +43,16 @@
 - [x] B2 Branch switcher actually filters — `/auth/me` gains `branch_ids`; `GET /branches` scoped to user's branches (kills manager data leak); `branch_id` params on `GET /clients`, `GET /repayments`, `GET /dashboard/stats`; dashboard/clients/loans/repayments pages pass the selection into their queries
 - [x] B3 Profile menu wired — My Profile + Permissions dialogs (from `/auth/me`), Settings → `/settings`, Change Password dialog → `PATCH /auth/change-password`
 
+### Phase B2 — User-observed fixes (2026-08-07) · top priority
+
+- [ ] U1 Admin console: permission changes actually take effect — `check_is_director` gate Director|System Admin (frontend already admits both; SysAdmin was silently 403); `updatePermissionsMutation` invalidates `role-permissions-matrix` + `me` (matrix visibly reverted after save); error states on all admin queries (silent empty console); Manage Roles modal verified for both roles
+- [ ] U2 User details drawer — `GET /admin/users/{id}` (profile + roles + permissions + branches + status + last login) + "View" action → Sheet in users table (Director/System Admin)
+- [ ] U3 Search deep-links to the record — topbar result click → `/clients?client=<id>` / `/loans?loan=<id>` auto-opens detail drawer/loan sheet (also fixes ignored `/loans?apply=true`)
+- [ ] U4 Profile photo in avatars — `/auth/me` returns `profile_photo` (AuthUser + UserProfile type); sidebar/user-menu/settings avatars render photo via AvatarImage with initials fallback, styling unchanged
+- [ ] U5 Recent activities complete — dashboard stats events add repayments (recorded+verified) and loan approvals/disbursements (currently loans/clients/fees only, despite card promising repayments)
+- [ ] U6 Notification preferences matched + persisted — Settings toggles rebuilt to the 6 real types (due_today/due_tomorrow/almost_due/arrears/repayment_pending/pending_approval), DB-backed per user (`notification_prefs` + GET/PATCH `/notifications/preferences`), bell filtered server-side
+- [ ] U7 Settings honesty + token expiry — `backend/.env` `ACCESS_TOKEN_EXPIRE_MINUTES` 30→60 (config default is 60; settings System Info text fixes: JWT 60 min, PostgreSQL live, storage mode); remove fake Appearance section (decorative — no `.dark` ever applied); drop remaining fake setTimeout saves
+
 ### Phase C — Core workflow close-out (P1–P3) · ~2 weeks
 
 - [x] C0 Client branch integrity on registration — form sends `branch_id` (dropdown for Director/System Admin, auto-assigned for scoped LO/Manager); backend validates branch exists (400) + enforces user scope on create/update (403); `GET /clients/{id}` and `POST /loans` scope-checked; clients page gate uses real `clients.create` permission
@@ -240,11 +250,11 @@ Director sends invite (Name + Email + Role + Branch)
 ### Frontend
 
 - [x] `app/(auth)/accept-invite/page.tsx` — token read, set password, success w/ employee number
-- [ ] `app/(auth)/complete-profile/page.tsx` — ❌ page does not exist
-- [x] `app/(dashboard)/users/page.tsx` — ✅ invite modal, pending invites tab, approve/cancel, status badges, activate/deactivate/suspend/reset actions (2026-08-07)
-- [x] `features/admin/api.ts` — ✅ invite/fetchInvites/cancelInvite/approveUser/updateUserStatus/resetPassword functions (2026-08-07)
-- [x] `features/auth/api.ts` — `acceptInviteApi` added ✅ (2026-08-07); `completeProfileApi`/`changePasswordApi` ❌
-- [ ] `app/(dashboard)/settings/page.tsx` — change-password form exists but is a **fake `setTimeout` save**; not wired to `PATCH /auth/change-password`
+- [ ] `app/(auth)/complete-profile/page.tsx` — ❌ page does not exist (profile step lives inside `accept-invite/page.tsx` since C1)
+- [x] `app/(dashboard)/users/page.tsx` — ✅ invite modal, pending invites tab, approve/cancel, Manage Roles modal (2026-08-07); status/reset actions ❌ not present despite earlier note — see U1/U2
+- [x] `features/admin/api.ts` — ✅ invite/fetchInvites/cancelInvite/approveUser/updateUserRoles/updateRolePermissions/fetchRolePermissions (2026-08-07); `updateUserStatus`/`resetPassword` ❌ do NOT exist — no frontend caller for the backend `PATCH status` / `POST reset-password` endpoints
+- [x] `features/auth/api.ts` — `acceptInviteApi` ✅; `completeProfileApi` (C1) + `changePasswordApi` (C2) ✅ (2026-08-07)
+- [x] `app/(dashboard)/settings/page.tsx` — change-password wired to `PATCH /auth/change-password` (C2, 2026-08-07); notifications/appearance sections still decorative — see U6/U7
 
 ---
 
