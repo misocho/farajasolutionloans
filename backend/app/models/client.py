@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import ForeignKey, String, Text, JSON
+from sqlalchemy import JSON, ForeignKey, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import BaseModel
@@ -57,6 +58,7 @@ class Client(BaseModel):
     business_landmark: Mapped[str | None] = mapped_column(String(255), nullable=True)
     business_years: Mapped[str | None] = mapped_column(String(20), nullable=True)
     business_location: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    estimated_asset_value: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
 
     # ── Guarantor ─────────────────────────────────────────────────────────────
     guarantor_surname: Mapped[str | None] = mapped_column(String(100), nullable=True)

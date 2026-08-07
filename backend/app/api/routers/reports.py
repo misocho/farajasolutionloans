@@ -14,14 +14,16 @@ from datetime import datetime, timezone, timedelta, date
 from decimal import Decimal
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.dependencies.auth import get_current_user
+from app.core.permissions import get_user_permissions
 from app.db.session import get_db
 from app.models.client import Client
 from app.models.enums import LoanStatus
+from app.models.fee_payment import FeePayment
 from app.models.installment import Installment
 from app.models.loan import Loan
 from app.models.repayment import Repayment
@@ -31,9 +33,8 @@ from app.services.loan_service import get_outstanding, calculate_penalty
 router = APIRouter(prefix="/reports", tags=["reports"])
 
 
-def _require_permission(user: User, perm: str) -> None:
-    from fastapi import HTTPException
-    user_perms = {rp.permission.name for ur in user.roles for rp in ur.role.permissions}
+def _require_permission(db: Session, user: User, perm: str) -> None:
+    user_perms = get_user_permissions(db, user)
     if perm not in user_perms:
         raise HTTPException(status_code=403, detail=f"Permission '{perm}' required.")
 
@@ -45,7 +46,7 @@ def get_portfolio_report(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _require_permission(current_user, "reports.view")
+    _require_permission(db, current_user, "reports.view")
     loans = db.scalars(
         select(Loan)
         .options(joinedload(Loan.client), joinedload(Loan.loan_product), joinedload(Loan.branch))
@@ -85,6 +86,7 @@ def get_portfolio_report(
             "client": loan.client.name if loan.client else "",
             "branch": loan.branch.name if loan.branch else "",
             "product": loan.loan_product.name if loan.loan_product else "",
+            "sector": loan.sector,
             "principal": float(loan.amount),
             "total_repayable": float(loan.total_repayable),
             "outstanding": float(outstanding),
@@ -117,7 +119,7 @@ def get_arrears_report(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _require_permission(current_user, "reports.view")
+    _require_permission(db, current_user, "reports.view")
     today = datetime.now(timezone.utc)
     overdue_loans = db.scalars(
         select(Loan)
@@ -149,6 +151,7 @@ def get_arrears_report(
             "client": loan.client.name if loan.client else "",
             "client_phone": loan.client.phone if loan.client else "",
             "branch": loan.branch.name if loan.branch else "",
+            "sector": loan.sector,
             "principal": float(loan.amount),
             "outstanding": float(outstanding),
             "days_overdue": penalty_info["days_overdue"],
@@ -177,7 +180,7 @@ def get_collections_report(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _require_permission(current_user, "reports.view")
+    _require_permission(db, current_user, "reports.view")
 
     now = datetime.now(timezone.utc)
     # Default: current calendar month
@@ -234,7 +237,7 @@ def get_clients_report(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _require_permission(current_user, "reports.view")
+    _require_permission(db, current_user, "reports.view")
 
     clients = db.scalars(
         select(Client).options(joinedload(Client.branch))
@@ -283,7 +286,7 @@ def get_executive_summary(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _require_permission(current_user, "reports.view")
+    _require_permission(db, current_user, "reports.view")
 
     today = datetime.now(timezone.utc)
     month_start = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -315,6 +318,14 @@ def get_executive_summary(
             )
         ) or 0),
         "unverified_repayments": db.scalar(select(func.count()).select_from(Repayment).where(Repayment.verified == False)) or 0,
+        "fee_income": float(db.scalar(
+            select(func.coalesce(func.sum(FeePayment.amount), 0)).where(FeePayment.verified == True)
+        ) or 0),
+        "fee_income_this_month": float(db.scalar(
+            select(func.coalesce(func.sum(FeePayment.amount), 0)).where(
+                FeePayment.verified == True, FeePayment.verified_at >= month_start
+            )
+        ) or 0),
     }
 
     return {

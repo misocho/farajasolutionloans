@@ -32,11 +32,16 @@ export interface PropertyItem {
 export interface Repayment {
   id: string;
   loan_id: string;
+  loan_number: string;
   client: string;
+  client_id?: string;
+  client_phone?: string | null;
   amount: number;
   date: string;
   mode: string;
   reference: string;
+  receipt_photo?: string | null;
+  notes?: string | null;
   recorded_by?: string;
   verified: boolean;
   verified_by?: string | null;
@@ -45,10 +50,12 @@ export interface Repayment {
 
 // ── Loan Interface ────────────────────────────────────────────────────────────
 
-export type LoanStatus = "Pending" | "Approved" | "Disbursed" | "Rejected" | "Closed";
+export type LoanStatus = "Pending" | "Approved" | "Disbursed" | "Rejected" | "Closed"
+  | "Almost Due" | "Due" | "Performing" | "Arrears" | "Past Maturity" | "Defaulter" | "Paid";
 
 export interface Loan {
   id: string;
+  loan_number: string;
   client: string;
   sector: string;
   amount: number;
@@ -74,6 +81,17 @@ export interface Loan {
   penalty_amount: number;
   // When fetched by ID
   repayments?: Repayment[];
+}
+
+export interface LoanProduct {
+  id: string;
+  name: string;
+  product_type: string;
+  duration_days: number;
+  interest_rate: number;
+  penalty_rate: number;
+  penalty_interval_days: number;
+  max_penalty_amount?: number | null;
 }
 
 // ── Client Interface ─────────────────────────────────────────────────────────
@@ -110,6 +128,7 @@ export interface Client {
   business_landmark?: string;
   business_years?: string;
   business_location?: string;
+  estimated_asset_value?: number | null;
   guarantor_surname?: string;
   guarantor_first_name?: string;
   guarantor_middle_name?: string;
@@ -135,10 +154,36 @@ export type ClientCreateData = Omit<Client, "id" | "date_registered">;
 
 // ── Fee Constants ────────────────────────────────────────────────────────────
 
-export const CLIENT_REGISTRATION_FEE = 1000;
 export const LOAN_APPLICATION_FEE = 500;
 export const INTEREST_RATE = 0.20;       // 20% flat
 export const PENALTY_RATE = 0.03;        // 3% per 2 days overdue
+
+// ── Fee Interfaces ───────────────────────────────────────────────────────────
+
+export interface FeeQuote {
+  amount: number;
+  tier: "existing" | "new";
+  is_existing_client: boolean;
+  minimum_amount: number;
+}
+
+export interface FeePayment {
+  id: string;
+  client_id: string;
+  client: string;
+  loan_id?: string | null;
+  loan_number?: string | null;
+  fee_type: string;
+  amount: number;
+  mode: string;
+  reference?: string | null;
+  notes?: string | null;
+  recorded_by?: string | null;
+  verified: boolean;
+  verified_by?: string | null;
+  verified_at?: string | null;
+  created_at?: string | null;
+}
 
 // ── API Functions ────────────────────────────────────────────────────────────
 
@@ -153,11 +198,40 @@ export async function fetchLoanApi(id: string): Promise<Loan> {
 }
 
 export async function createLoanApi(data: {
-  client: string; sector: string; amount: number;
-  duration_days: number; application_fee?: number;
-  notes?: string; submitted_by?: string;
+  client_id: string; loan_product_id: string; amount: number;
+  sector?: string; notes?: string;
 }): Promise<Loan> {
   const res = await api.post<Loan>("/loans", data);
+  return res.data;
+}
+
+export async function fetchLoanProductsApi() {
+  const res = await api.get("/loan-products");
+  return res.data;
+}
+
+// ── Fee API ──────────────────────────────────────────────────────────────────
+
+export async function fetchFeeQuoteApi(client_id: string, amount: number): Promise<FeeQuote> {
+  const res = await api.get<FeeQuote>("/fees/quote", { params: { client_id, amount } });
+  return res.data;
+}
+
+export async function fetchFeesApi(client_id?: string): Promise<FeePayment[]> {
+  const res = await api.get<FeePayment[]>("/fees", { params: client_id ? { client_id } : {} });
+  return res.data;
+}
+
+export async function recordFeeApi(data: {
+  client_id: string; amount: number; mode: string;
+  reference?: string; notes?: string;
+}): Promise<FeePayment> {
+  const res = await api.post<FeePayment>("/fees", data);
+  return res.data;
+}
+
+export async function verifyFeeApi(id: string): Promise<FeePayment> {
+  const res = await api.post<FeePayment>(`/fees/${id}/verify`);
   return res.data;
 }
 
@@ -190,7 +264,7 @@ export async function fetchRepaymentsApi(loan_id?: string): Promise<Repayment[]>
 
 export async function createRepaymentApi(data: {
   loan_id: string; client: string; amount: number;
-  mode: string; reference?: string; recorded_by?: string;
+  mode: string; reference?: string; receipt_photo?: string | null; recorded_by?: string;
 }): Promise<Repayment> {
   const res = await api.post<Repayment>("/repayments", data);
   return res.data;
@@ -248,9 +322,8 @@ export interface BranchStats {
 export interface Branch {
   id: string;
   name: string;
-  location: string;
-  manager_name: string;
-  manager_phone: string;
+  code: string;
+  address: string;
   phone: string;
   email: string;
   is_active: boolean;
@@ -331,5 +404,15 @@ export interface NotificationsResponse {
 
 export async function fetchNotificationsApi(): Promise<NotificationsResponse> {
   const res = await api.get<NotificationsResponse>("/notifications");
+  return res.data;
+}
+
+export async function markAllNotificationsReadApi(): Promise<{ status: string; message: string }> {
+  const res = await api.patch("/notifications/read-all");
+  return res.data;
+}
+
+export async function markNotificationReadApi(notificationId: string): Promise<{ status: string; message: string }> {
+  const res = await api.patch(`/notifications/${notificationId}/read`);
   return res.data;
 }
