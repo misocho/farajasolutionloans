@@ -15,6 +15,19 @@ Act as a **senior staff engineer** on a production microfinance (lending) system
 - **Money is real.** This is a lending system: a rounding or duplicate-payment bug costs actual money. Slow down on anything touching amounts, statuses, or dates.
 - **Report honestly.** After a task, state exactly what changed and what you verified (commands run, build/lint results).
 
+## Roadmap execution (per-item workflow)
+
+We work through the **Roadmap to Launch** checklist in `PLAN.md`. Every completed item follows the same loop:
+
+1. Implement the smallest safe change (verify with `ruff check` backend / `pnpm build` + `pnpm lint` frontend).
+2. Tick the item `[x]` in `PLAN.md`; if the item changes architecture, permissions, or known bugs, update the matching section here and in `PLAN.md` too.
+3. Commit code + `PLAN.md` + `AGENTS.md` together in **one logical commit** (Conventional Commits: `feat:`, `fix:`, `docs:`).
+4. Push immediately (`git push origin main` → Render auto-deploy).
+5. Confirm the item is live on staging before moving to the next.
+
+- One commit per item; no force push, no amending pushed commits.
+- Deferred items get `[~]` plus a note in the Decisions Log (`PLAN.md`) and are never silently dropped.
+
 ## Project overview
 
 Microloan management system for Faraja Solution Loans (Kenya): loan products (Faraja 4wk / 5wk / Lumpsum), client registration with KYC documents and signatures, loan workflow (pending → approved → disbursed → closed), weekly installment tracking, penalty calculation (3% per 2 days), repayments with manual verification, branches, users/roles/permissions, reports, and notifications. Master plan + live progress: `PLAN.md` (read before starting work).
@@ -121,12 +134,12 @@ Use these exact strings. Known historical violations (do not reintroduce): `clie
 ## Boundaries — do not touch without asking
 
 - `backend/.env` (secrets — gitignored, never commit), `frontend/.env.local`, `node_modules/`, `.next/`, `.venv/`, `uv.lock`/`pnpm-lock.yaml` (no dependency changes without approval), `alembic/versions/*` (migrations are immutable once applied — new revisions only), `PLAN.md` status sections (update only as part of a plan-update task).
-- Never commit anything (no `git commit`/`git push` unless explicitly asked).
+- Never commit anything (no `git commit`/`git push` unless explicitly asked). **Exception:** roadmap-item completion commits are pre-approved by the owner (see "Roadmap execution" above) — code + `PLAN.md` + `AGENTS.md` in one Conventional Commit per item, pushed immediately.
 - Never delete or rewrite seeded data definitions (`app/core/branches.py`, `app/core/permissions.py`, `app/db/seed.py`) without flagging that DB reseeding will be needed.
 
 ## Git workflow
 
-If asked to commit: stage only files relevant to the task (check `git status` + `git diff` first), Conventional Commits style (`fix:`, `feat:`, `docs:`, `chore:`), one logical change per commit. No force push, no amending pushed commits.
+If asked to commit: stage only files relevant to the task (check `git status` + `git diff` first), Conventional Commits style (`fix:`, `feat:`, `docs:`, `chore:`), one logical change per commit. No force push, no amending pushed commits. Roadmap items bypass the "ask first" rule — see "Roadmap execution".
 
 ## Prompting the user's way (for agents and humans)
 

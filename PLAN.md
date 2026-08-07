@@ -25,6 +25,54 @@
 
 ---
 
+## Roadmap to Launch — CLIENT-APPROVED + LAUNCH-READY (2026-08-07)
+
+> **Definition of done:** Phase A feedback loop closed with client sign-off + phases B–E complete + launch gate (Phase F) passed.
+> **Workflow:** tick each item `[x]` and **commit + push immediately on completion** — one logical commit per item (see AGENTS.md "Roadmap execution"). Deferred items get `[~]` + a Decisions Log note.
+> **Standing decisions:** no automated tests (AGENTS.md) · M-Pesa remains future scope · complete-profile IS in scope · total effort ≈ 6 weeks of work.
+
+### Phase A — Client UAT + feedback loop (staging, ongoing)
+
+- [ ] A1 Verify duplicate-invite fix deployed on staging (health + 409 on duplicate invite, live)
+- [ ] A2 Run client through `CLIENT_TEST_GUIDE.txt`; collect feedback
+- [ ] A3 Convert feedback to a prioritized backlog (fix / defer / won't-do) — client re-signs at the launch gate
+
+### Phase B — Core workflow close-out (P1–P3) · ~2 weeks
+
+- [ ] B1 `POST /auth/complete-profile` + accept-invite → profile step (phone/ID/photo) → PENDING_APPROVAL
+- [ ] B2 Settings change-password wired to `PATCH /auth/change-password` (remove fake setTimeout save)
+- [ ] B3 Client detail drawer → `GET /clients/{id}` (`fetchClientApi` + wire)
+- [ ] B4 Full computed status badges (Almost Due / Due / Arrears / Past Maturity / Defaulter) + per-loan installment timeline
+- [ ] B5 Partial-payment → Arrears verified end-to-end + partial-payment warning in repayments UI
+- [ ] B6 `PATCH /admin/loan-products/{id}` (penalty rate/interval config)
+- [ ] B7 Google Maps link input + preview on client form
+- [ ] B8 Branch-scoping verification pass (LO/Manager see own branch only) + close permission-guard gaps (`GET /loan-products`, `/dashboard/stats`, `/notifications`)
+
+### Phase C — Reports & email notifications (P4–P5) · ~2 weeks
+
+- [ ] C1 Financial report (month/year per branch: active clients, disbursed, repayments, P&L, write-offs) + frontend tab, month/year picker, branch filter, export
+- [ ] C2 APScheduler daily job — due/arrears emails (T-2, due-today, arrears, past-maturity) + loan approved/disbursed → LO + penalty snapshot
+- [ ] C3 CSV export for existing reports
+
+### Phase D — PDF & audit trail (P6, P7-C) · ~1 week
+
+- [ ] D1 `pdf_service.py` (ReportLab) + `GET /clients/{id}/pdf` + "Download Form PDF" button (signatures already captured)
+- [ ] D2 `audit_logs` table + event writes (approve/disburse/close, repayment/fee record+verify, client create) + `GET /audit-logs` + Audit Logs page (replaces dead button)
+
+### Phase E — Production hardening · ~1 week
+
+- [ ] E1 Business answers: Lumpsum rate + company section in client form (needed for launch seed)
+- [ ] E2 Backend root `main.py` stub cleanup + register `/health`
+- [ ] E3 S3 for photos/signatures + Neon prod DB + backup strategy + secret-rotation verification (Resend key, `SECRET_KEY`)
+- [ ] E4 Lint debt (84 pre-existing) + fix stale `make deploy` (uvx → /var/opt/uv) + refresh MANUAL_DEPLOY.md
+
+### Phase F — Launch gate
+
+- [ ] F1 Client sign-off on UAT feedback + final walkthrough on prod data
+- [ ] F2 Seed prod DB, flip frontend to prod, go-live
+
+---
+
 ## Actual Progress Snapshot (from 2026-08-07 code survey)
 
 > Backend is **fully DB-backed — zero mock-data endpoints remain**. Frontend is mostly wired to real APIs. Remaining work: complete-profile, settings change-password wiring, client detail fetch, advanced loan statuses, financial report, scheduled email jobs, PDF service, and bug fixes below.
