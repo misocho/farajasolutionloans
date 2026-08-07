@@ -291,7 +291,7 @@ export async function verifyRepaymentApi(id: string, verified_by: string): Promi
 // ── Dashboard Stats API ───────────────────────────────────────────────────────
 
 export interface DashboardActivity {
-  type: "repayment" | "loan" | "client" | "fee";
+  type: "repayment" | "loan" | "approval" | "disbursement" | "client" | "fee";
   title: string;
   description: string;
   time: string;

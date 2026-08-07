@@ -14,6 +14,8 @@ import {
   Loader2,
   UserPlus,
   Receipt,
+  CheckCircle2,
+  Send,
 } from "lucide-react";
 import {
   AreaChart,
@@ -40,6 +42,8 @@ import { formatKES, formatDate } from "@/app/lib/format";
 const ACTIVITY_ICONS: Record<DashboardActivity["type"], { icon: typeof Coins; bg: string; color: string }> = {
   repayment: { icon: Coins, bg: "bg-emerald-500/10 text-emerald-600", color: "text-emerald-600" },
   loan: { icon: FileText, bg: "bg-[#0D44A2]/10", color: "text-[#0D44A2]" },
+  approval: { icon: CheckCircle2, bg: "bg-[#0D44A2]/10", color: "text-[#0D44A2]" },
+  disbursement: { icon: Send, bg: "bg-emerald-500/10 text-emerald-600", color: "text-emerald-600" },
   client: { icon: UserPlus, bg: "bg-[#F57424]/10", color: "text-[#F57424]" },
   fee: { icon: Receipt, bg: "bg-amber-500/10", color: "text-amber-600" },
 };
@@ -304,7 +308,7 @@ export default function DashboardPage() {
               <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-4 sm:p-5 rounded-[20px] sm:rounded-[24px] shadow-sm flex flex-col gap-4">
                 <div className="flex flex-col text-left">
                   <h3 className="font-bold text-zinc-900 dark:text-zinc-50 text-base">Recent Activities</h3>
-                  <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-0.5">Latest repayments, applications, registrations and fees</p>
+                  <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-0.5">Latest repayments, loan applications, approvals, disbursements, registrations and fees</p>
                 </div>
 
                 <div className="flex flex-col gap-3.5 mt-2">

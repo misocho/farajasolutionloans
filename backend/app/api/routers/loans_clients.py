@@ -1052,6 +1052,26 @@ def get_dashboard_stats(
     if loan_cond is not None:
         stmt = stmt.where(loan_cond)
     recent_loans = db.execute(stmt).all()
+    stmt = (
+        select(Loan, Client.name)
+        .join(Client, Loan.client_id == Client.id)
+        .where(Loan.date_approved.isnot(None))
+        .order_by(Loan.date_approved.desc())
+        .limit(8)
+    )
+    if loan_cond is not None:
+        stmt = stmt.where(loan_cond)
+    recent_approvals = db.execute(stmt).all()
+    stmt = (
+        select(Loan, Client.name)
+        .join(Client, Loan.client_id == Client.id)
+        .where(Loan.disbursed_date.isnot(None))
+        .order_by(Loan.disbursed_date.desc())
+        .limit(8)
+    )
+    if loan_cond is not None:
+        stmt = stmt.where(loan_cond)
+    recent_disbursements = db.execute(stmt).all()
     stmt = select(Client).order_by(Client.created_at.desc()).limit(8)
     if client_cond is not None:
         stmt = stmt.where(client_cond)
@@ -1080,6 +1100,20 @@ def get_dashboard_stats(
             "title": f"Loan application {loan.loan_number}",
             "description": f"{client_name} · KES {float(loan.amount):,.0f}",
             "time": loan.date_submitted.isoformat(),
+        })
+    for loan, client_name in recent_approvals:
+        events.append({
+            "type": "approval",
+            "title": f"Loan {loan.loan_number} approved",
+            "description": f"{client_name} · KES {float(loan.amount):,.0f}",
+            "time": loan.date_approved.isoformat(),
+        })
+    for loan, client_name in recent_disbursements:
+        events.append({
+            "type": "disbursement",
+            "title": f"Loan {loan.loan_number} disbursed",
+            "description": f"{client_name} · KES {float(loan.amount):,.0f}",
+            "time": loan.disbursed_date.isoformat(),
         })
     for client in recent_clients:
         events.append({
