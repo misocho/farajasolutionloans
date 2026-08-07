@@ -5,6 +5,7 @@ from app.models.fee_payment import FeePayment
 from app.models.installment import Installment
 from app.models.loan import Loan
 from app.models.loan_product import LoanProduct
+from app.models.notification_pref import NotificationPref
 from app.models.notification_read import NotificationRead
 from app.models.permission import Permission
 from app.models.repayment import Repayment

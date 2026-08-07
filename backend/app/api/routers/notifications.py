@@ -14,7 +14,7 @@ PATCH /notifications/read-all — mark all read (clears badge count)
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
@@ -26,11 +26,25 @@ from app.core.permissions import get_user_permissions
 from app.db.session import get_db
 from app.models.enums import LoanStatus
 from app.models.loan import Loan
+from app.models.notification_pref import DEFAULT_PREFS, NotificationPref
 from app.models.notification_read import NotificationRead
 from app.models.repayment import Repayment
 from app.models.user import User
+from app.schemas.notifications import (
+    NotificationPrefs,
+    NotificationPrefsResponse,
+    UpdateNotificationPrefsRequest,
+)
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
+
+
+def _get_prefs(db: Session, user_id: UUID) -> dict[str, bool]:
+    prefs = dict(DEFAULT_PREFS)
+    row = db.get(NotificationPref, user_id)
+    if row is not None and row.prefs:
+        prefs.update(row.prefs)
+    return prefs
 
 
 def _priority(days_overdue: int) -> str:
@@ -45,146 +59,153 @@ def _priority(days_overdue: int) -> str:
 
 def _build_notifications(db: Session, current_user: User) -> list[dict]:
     """Compute all live notifications for the current user (no read flags)."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     today = now.date()
     tomorrow = today + timedelta(days=1)
     almost_due_threshold = today + timedelta(days=2)
 
     notifications = []
+    prefs = _get_prefs(db, current_user.id)
 
     # 1. Loans due today
-    due_today = db.scalars(
-        select(Loan)
-        .options(joinedload(Loan.client))
-        .where(
-            Loan.status == LoanStatus.DISBURSED,
-            Loan.due_date >= datetime(today.year, today.month, today.day, tzinfo=timezone.utc),
-            Loan.due_date < datetime(tomorrow.year, tomorrow.month, tomorrow.day, tzinfo=timezone.utc),
-        )
-    ).unique().all()
-
-    for loan in due_today:
-        notifications.append({
-            "id": f"due-today-{loan.id}",
-            "type": "due_today",
-            "priority": "critical",
-            "title": "Loan Due Today",
-            "description": f"{loan.client.name} — {loan.loan_number} is due today. Outstanding: KES {loan.total_repayable:,.0f}",
-            "time": now.isoformat(),
-            "loan_id": str(loan.id),
-        })
-
-    # 2. Loans due tomorrow
-    due_tomorrow = db.scalars(
-        select(Loan)
-        .options(joinedload(Loan.client))
-        .where(
-            Loan.status == LoanStatus.DISBURSED,
-            Loan.due_date >= datetime(tomorrow.year, tomorrow.month, tomorrow.day, tzinfo=timezone.utc),
-            Loan.due_date < datetime((tomorrow + timedelta(days=1)).year,
-                                     (tomorrow + timedelta(days=1)).month,
-                                     (tomorrow + timedelta(days=1)).day, tzinfo=timezone.utc),
-        )
-    ).unique().all()
-
-    for loan in due_tomorrow:
-        notifications.append({
-            "id": f"due-tomorrow-{loan.id}",
-            "type": "due_tomorrow",
-            "priority": "high",
-            "title": "Due Tomorrow",
-            "description": f"{loan.client.name} — {loan.loan_number} is due tomorrow.",
-            "time": now.isoformat(),
-            "loan_id": str(loan.id),
-        })
-
-    # 3. Almost due (within 2 days, not today or tomorrow)
-    day_after_tomorrow = tomorrow + timedelta(days=1)
-    almost_due = db.scalars(
-        select(Loan)
-        .options(joinedload(Loan.client))
-        .where(
-            Loan.status == LoanStatus.DISBURSED,
-            Loan.due_date >= datetime(day_after_tomorrow.year, day_after_tomorrow.month, day_after_tomorrow.day, tzinfo=timezone.utc),
-            Loan.due_date < datetime(almost_due_threshold.year, almost_due_threshold.month, almost_due_threshold.day, tzinfo=timezone.utc) + timedelta(days=1),
-        )
-    ).unique().all()
-
-    for loan in almost_due:
-        notifications.append({
-            "id": f"almost-due-{loan.id}",
-            "type": "almost_due",
-            "priority": "medium",
-            "title": "Loan Almost Due",
-            "description": f"{loan.client.name} — {loan.loan_number} is due in 2 days ({loan.due_date.date().isoformat() if loan.due_date else ''}).",
-            "time": now.isoformat(),
-            "loan_id": str(loan.id),
-        })
-
-    # 4. Overdue loans (arrears)
-    overdue = db.scalars(
-        select(Loan)
-        .options(joinedload(Loan.client))
-        .where(
-            Loan.status == LoanStatus.DISBURSED,
-            Loan.due_date < datetime(today.year, today.month, today.day, tzinfo=timezone.utc),
-        )
-    ).unique().all()
-
-    for loan in overdue:
-        days = (today - loan.due_date.date()).days if loan.due_date else 0
-        notifications.append({
-            "id": f"arrears-{loan.id}",
-            "type": "arrears",
-            "priority": _priority(days),
-            "title": "Loan in Arrears",
-            "description": f"{loan.client.name} — {loan.loan_number} is {days} day{'s' if days != 1 else ''} overdue.",
-            "time": now.isoformat(),
-            "loan_id": str(loan.id),
-        })
-
-    # 5. Unverified repayments
-    unverified = db.scalars(
-        select(Repayment)
-        .options(joinedload(Repayment.loan), joinedload(Repayment.client))
-        .where(Repayment.verified == False)
-        .order_by(Repayment.date.desc())
-        .limit(20)
-    ).unique().all()
-
-    for rep in unverified:
-        notifications.append({
-            "id": f"unverified-{rep.id}",
-            "type": "repayment_pending",
-            "priority": "medium",
-            "title": "Payment Awaiting Verification",
-            "description": f"KES {float(rep.amount):,.0f} from {rep.client.name if rep.client else 'client'} — recorded and pending Manager/Director approval.",
-            "time": rep.date.isoformat() if rep.date else now.isoformat(),
-            "repayment_id": str(rep.id),
-            "loan_id": str(rep.loan_id),
-        })
-
-    # 6. Loans pending approval (for managers/directors)
-    user_perms = get_user_permissions(db, current_user)
-    if "loans.approve" in user_perms:
-        pending_loans = db.scalars(
+    if prefs.get("due_today", True):
+        due_today = db.scalars(
             select(Loan)
             .options(joinedload(Loan.client))
-            .where(Loan.status == LoanStatus.PENDING)
-            .order_by(Loan.date_submitted.desc())
-            .limit(10)
+            .where(
+                Loan.status == LoanStatus.DISBURSED,
+                Loan.due_date >= datetime(today.year, today.month, today.day, tzinfo=UTC),
+                Loan.due_date < datetime(tomorrow.year, tomorrow.month, tomorrow.day, tzinfo=UTC),
+            )
         ).unique().all()
 
-        for loan in pending_loans:
+        for loan in due_today:
             notifications.append({
-                "id": f"pending-approval-{loan.id}",
-                "type": "pending_approval",
-                "priority": "high",
-                "title": "Loan Awaiting Approval",
-                "description": f"{loan.client.name if loan.client else 'Client'} — {loan.loan_number} (KES {float(loan.amount):,.0f}) is awaiting your approval.",
-                "time": loan.date_submitted.isoformat() if loan.date_submitted else now.isoformat(),
+                "id": f"due-today-{loan.id}",
+                "type": "due_today",
+                "priority": "critical",
+                "title": "Loan Due Today",
+                "description": f"{loan.client.name} — {loan.loan_number} is due today. Outstanding: KES {loan.total_repayable:,.0f}",
+                "time": now.isoformat(),
                 "loan_id": str(loan.id),
             })
+
+    # 2. Loans due tomorrow
+    if prefs.get("due_tomorrow", True):
+        due_tomorrow = db.scalars(
+            select(Loan)
+            .options(joinedload(Loan.client))
+            .where(
+                Loan.status == LoanStatus.DISBURSED,
+                Loan.due_date >= datetime(tomorrow.year, tomorrow.month, tomorrow.day, tzinfo=UTC),
+                Loan.due_date < datetime((tomorrow + timedelta(days=1)).year,
+                                         (tomorrow + timedelta(days=1)).month,
+                                         (tomorrow + timedelta(days=1)).day, tzinfo=UTC),
+            )
+        ).unique().all()
+
+        for loan in due_tomorrow:
+            notifications.append({
+                "id": f"due-tomorrow-{loan.id}",
+                "type": "due_tomorrow",
+                "priority": "high",
+                "title": "Due Tomorrow",
+                "description": f"{loan.client.name} — {loan.loan_number} is due tomorrow.",
+                "time": now.isoformat(),
+                "loan_id": str(loan.id),
+            })
+
+    # 3. Almost due (within 2 days, not today or tomorrow)
+    if prefs.get("almost_due", True):
+        day_after_tomorrow = tomorrow + timedelta(days=1)
+        almost_due = db.scalars(
+            select(Loan)
+            .options(joinedload(Loan.client))
+            .where(
+                Loan.status == LoanStatus.DISBURSED,
+                Loan.due_date >= datetime(day_after_tomorrow.year, day_after_tomorrow.month, day_after_tomorrow.day, tzinfo=UTC),
+                Loan.due_date < datetime(almost_due_threshold.year, almost_due_threshold.month, almost_due_threshold.day, tzinfo=UTC) + timedelta(days=1),
+            )
+        ).unique().all()
+
+        for loan in almost_due:
+            notifications.append({
+                "id": f"almost-due-{loan.id}",
+                "type": "almost_due",
+                "priority": "medium",
+                "title": "Loan Almost Due",
+                "description": f"{loan.client.name} — {loan.loan_number} is due in 2 days ({loan.due_date.date().isoformat() if loan.due_date else ''}).",
+                "time": now.isoformat(),
+                "loan_id": str(loan.id),
+            })
+
+    # 4. Overdue loans (arrears)
+    if prefs.get("arrears", True):
+        overdue = db.scalars(
+            select(Loan)
+            .options(joinedload(Loan.client))
+            .where(
+                Loan.status == LoanStatus.DISBURSED,
+                Loan.due_date < datetime(today.year, today.month, today.day, tzinfo=UTC),
+            )
+        ).unique().all()
+
+        for loan in overdue:
+            days = (today - loan.due_date.date()).days if loan.due_date else 0
+            notifications.append({
+                "id": f"arrears-{loan.id}",
+                "type": "arrears",
+                "priority": _priority(days),
+                "title": "Loan in Arrears",
+                "description": f"{loan.client.name} — {loan.loan_number} is {days} day{'s' if days != 1 else ''} overdue.",
+                "time": now.isoformat(),
+                "loan_id": str(loan.id),
+            })
+
+    # 5. Unverified repayments
+    if prefs.get("repayment_pending", True):
+        unverified = db.scalars(
+            select(Repayment)
+            .options(joinedload(Repayment.loan), joinedload(Repayment.client))
+            .where(Repayment.verified == False)
+            .order_by(Repayment.date.desc())
+            .limit(20)
+        ).unique().all()
+
+        for rep in unverified:
+            notifications.append({
+                "id": f"unverified-{rep.id}",
+                "type": "repayment_pending",
+                "priority": "medium",
+                "title": "Payment Awaiting Verification",
+                "description": f"KES {float(rep.amount):,.0f} from {rep.client.name if rep.client else 'client'} — recorded and pending Manager/Director approval.",
+                "time": rep.date.isoformat() if rep.date else now.isoformat(),
+                "repayment_id": str(rep.id),
+                "loan_id": str(rep.loan_id),
+            })
+
+    # 6. Loans pending approval (for managers/directors)
+    if prefs.get("pending_approval", True):
+        user_perms = get_user_permissions(db, current_user)
+        if "loans.approve" in user_perms:
+            pending_loans = db.scalars(
+                select(Loan)
+                .options(joinedload(Loan.client))
+                .where(Loan.status == LoanStatus.PENDING)
+                .order_by(Loan.date_submitted.desc())
+                .limit(10)
+            ).unique().all()
+
+            for loan in pending_loans:
+                notifications.append({
+                    "id": f"pending-approval-{loan.id}",
+                    "type": "pending_approval",
+                    "priority": "high",
+                    "title": "Loan Awaiting Approval",
+                    "description": f"{loan.client.name if loan.client else 'Client'} — {loan.loan_number} (KES {float(loan.amount):,.0f}) is awaiting your approval.",
+                    "time": loan.date_submitted.isoformat() if loan.date_submitted else now.isoformat(),
+                    "loan_id": str(loan.id),
+                })
 
     # Sort by priority: critical → high → medium → low
     priority_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
@@ -217,6 +238,32 @@ def get_notifications(
         "unread_count": unread_count,
         "total": len(notifications),
     }
+
+
+@router.get("/preferences", response_model=NotificationPrefsResponse)
+def get_preferences(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    prefs = _get_prefs(db, current_user.id)
+    return NotificationPrefsResponse(preferences=NotificationPrefs(**prefs))
+
+
+@router.patch("/preferences", response_model=NotificationPrefsResponse)
+def update_preferences(
+    request: UpdateNotificationPrefsRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    merged = _get_prefs(db, current_user.id)
+    merged.update(request.preferences.model_dump())
+    row = db.get(NotificationPref, current_user.id)
+    if row is None:
+        db.add(NotificationPref(user_id=current_user.id, prefs=merged))
+    else:
+        row.prefs = merged
+    db.commit()
+    return NotificationPrefsResponse(preferences=NotificationPrefs(**merged))
 
 
 @router.patch("/read-all")

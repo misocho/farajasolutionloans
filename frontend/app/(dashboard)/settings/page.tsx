@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Settings,
   User,
@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { fetchMeApi, changePasswordApi } from "@/features/auth/api";
+import { fetchNotificationPrefsApi, updateNotificationPrefsApi, type NotificationPrefs } from "@/features/clients/api";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -31,13 +32,29 @@ type ApiError = {
 };
 
 export default function SettingsPage() {
+  const queryClient = useQueryClient();
   const [activeSection, setActiveSection] = useState<string>("profile");
   const [theme, setTheme] = useState<ThemeOption>("system");
-  const [notifs, setNotifs] = useState({ loansApproved: true, repaymentsReceived: true, systemAlerts: false, dailyDigest: true });
   const [pinForm, setPinForm] = useState({ current: "", next: "", confirm: "" });
   const [saving, setSaving] = useState(false);
 
   const { data: user } = useQuery({ queryKey: ["me"], queryFn: fetchMeApi });
+
+  const { data: prefs } = useQuery({ queryKey: ["notification-prefs"], queryFn: fetchNotificationPrefsApi });
+
+  const prefsMutation = useMutation({
+    mutationFn: updateNotificationPrefsApi,
+    onSuccess: (saved) => {
+      queryClient.setQueryData(["notification-prefs"], saved);
+      toast.success("Notification preferences updated");
+    },
+    onError: (err: ApiError) => {
+      toast.error("Could not update preferences", {
+        description: err?.response?.data?.detail ?? "Please try again.",
+      });
+      queryClient.invalidateQueries({ queryKey: ["notification-prefs"] });
+    },
+  });
 
   const passwordMutation = useMutation({
     mutationFn: (data: { current_password: string; new_password: string }) => changePasswordApi(data),
@@ -200,30 +217,35 @@ export default function SettingsPage() {
                 <Bell className="size-4" />
                 <span>Notification Preferences</span>
               </div>
+              <p className="text-xs text-zinc-400">Choose which notifications appear in your bell. Changes apply immediately.</p>
               <div className="space-y-2">
                 {[
-                  { key: "loansApproved", label: "Loan Approvals", desc: "Notify when a loan application is approved" },
-                  { key: "repaymentsReceived", label: "Repayments", desc: "Notify on each payment receipt" },
-                  { key: "systemAlerts", label: "System Alerts", desc: "Critical system warnings and downtime" },
-                  { key: "dailyDigest", label: "Daily Digest", desc: "End-of-day portfolio summary" },
-                ].map(n => (
-                  <label key={n.key} className="flex items-center justify-between p-3.5 rounded-2xl border border-zinc-100 dark:border-zinc-800 hover:border-zinc-200 dark:hover:border-zinc-700 cursor-pointer bg-zinc-50/30 transition-colors">
-                    <div>
-                      <p className="text-xs font-bold text-zinc-900 dark:text-zinc-100">{n.label}</p>
-                      <p className="text-[10px] text-zinc-400 mt-0.5">{n.desc}</p>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={(notifs as any)[n.key]}
-                      onChange={e => setNotifs({...notifs, [n.key]: e.target.checked})}
-                      className="size-4 rounded border-zinc-300 text-[#0D44A2] shrink-0 ml-3"
-                    />
-                  </label>
-                ))}
+                  { key: "due_today", label: "Loans Due Today", desc: "Alert when a client's loan falls due today" },
+                  { key: "due_tomorrow", label: "Loans Due Tomorrow", desc: "Alert when a client's loan falls due tomorrow" },
+                  { key: "almost_due", label: "Loans Almost Due", desc: "Alert for loans due within the next 2 days" },
+                  { key: "arrears", label: "Loans in Arrears", desc: "Alert when a loan passes its due date unpaid" },
+                  { key: "repayment_pending", label: "Pending Repayments", desc: "Payments recorded but not yet verified" },
+                  { key: "pending_approval", label: "Loans Awaiting Approval", desc: "New loan applications waiting for your approval" },
+                ].map(n => {
+                  const key = n.key as keyof NotificationPrefs;
+                  const enabled = prefs?.[key] ?? true;
+                  return (
+                    <label key={n.key} className="flex items-center justify-between p-3.5 rounded-2xl border border-zinc-100 dark:border-zinc-800 hover:border-zinc-200 dark:hover:border-zinc-700 cursor-pointer bg-zinc-50/30 transition-colors">
+                      <div>
+                        <p className="text-xs font-bold text-zinc-900 dark:text-zinc-100">{n.label}</p>
+                        <p className="text-[10px] text-zinc-400 mt-0.5">{n.desc}</p>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={enabled}
+                        disabled={prefsMutation.isPending}
+                        onChange={e => prefsMutation.mutate({ [key]: e.target.checked })}
+                        className="size-4 rounded border-zinc-300 text-[#0D44A2] shrink-0 ml-3 cursor-pointer"
+                      />
+                    </label>
+                  );
+                })}
               </div>
-              <Button onClick={() => handleSave("Notification")} disabled={saving} className="bg-[#0D44A2] hover:bg-[#0A3682] text-white rounded-xl h-10 text-xs font-bold">
-                Save Preferences
-              </Button>
             </>
           )}
 

@@ -485,3 +485,22 @@ export async function markNotificationReadApi(notificationId: string): Promise<{
   const res = await api.patch(`/notifications/${notificationId}/read`);
   return res.data;
 }
+
+export interface NotificationPrefs {
+  due_today: boolean;
+  due_tomorrow: boolean;
+  almost_due: boolean;
+  arrears: boolean;
+  repayment_pending: boolean;
+  pending_approval: boolean;
+}
+
+export async function fetchNotificationPrefsApi(): Promise<NotificationPrefs> {
+  const res = await api.get<{ preferences: NotificationPrefs }>("/notifications/preferences");
+  return res.data.preferences;
+}
+
+export async function updateNotificationPrefsApi(preferences: Partial<NotificationPrefs>): Promise<NotificationPrefs> {
+  const res = await api.patch<{ preferences: NotificationPrefs }>("/notifications/preferences", { preferences });
+  return res.data.preferences;
+}
