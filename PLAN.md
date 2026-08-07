@@ -37,39 +37,45 @@
 - [ ] A2 Run client through `CLIENT_TEST_GUIDE.txt`; collect feedback
 - [ ] A3 Convert feedback to a prioritized backlog (fix / defer / won't-do) — client re-signs at the launch gate
 
-### Phase B — Core workflow close-out (P1–P3) · ~2 weeks
+### Phase B — Top navigation & profile (second priority, client-raised 2026-08-07)
 
-- [ ] B1 `POST /auth/complete-profile` + accept-invite → profile step (phone/ID/photo) → PENDING_APPROVAL
-- [ ] B2 Settings change-password wired to `PATCH /auth/change-password` (remove fake setTimeout save)
-- [ ] B3 Client detail drawer → `GET /clients/{id}` (`fetchClientApi` + wire)
-- [ ] B4 Full computed status badges (Almost Due / Due / Arrears / Past Maturity / Defaulter) + per-loan installment timeline
-- [ ] B5 Partial-payment → Arrears verified end-to-end + partial-payment warning in repayments UI
-- [ ] B6 `PATCH /admin/loan-products/{id}` (penalty rate/interval config)
-- [ ] B7 Google Maps link input + preview on client form
-- [ ] B8 Branch-scoping verification pass (LO/Manager see own branch only) + close permission-guard gaps (`GET /loan-products`, `/dashboard/stats`, `/notifications`)
+- [ ] B1 Global search in top nav — backend `GET /search?q=` (clients by name/phone/ID, loans by number, branch-scoped) + debounced results dropdown in topbar → click navigates to the right page
+- [ ] B2 Branch switcher actually filters — `/auth/me` gains `branch_ids`; `GET /branches` scoped to user's branches (kills manager data leak); `branch_id` params on `GET /clients`, `GET /repayments`, `GET /dashboard/stats`; dashboard/clients/loans/repayments pages pass the selection into their queries
+- [ ] B3 Profile menu wired — My Profile + Permissions dialogs (from `/auth/me`), Settings → `/settings`, Change Password dialog → `PATCH /auth/change-password`
 
-### Phase C — Reports & email notifications (P4–P5) · ~2 weeks
+### Phase C — Core workflow close-out (P1–P3) · ~2 weeks
 
-- [ ] C1 Financial report (month/year per branch: active clients, disbursed, repayments, P&L, write-offs) + frontend tab, month/year picker, branch filter, export
-- [ ] C2 APScheduler daily job — due/arrears emails (T-2, due-today, arrears, past-maturity) + loan approved/disbursed → LO + penalty snapshot
-- [ ] C3 CSV export for existing reports
+- [ ] C1 `POST /auth/complete-profile` + accept-invite → profile step (phone/ID/photo) → PENDING_APPROVAL
+- [ ] C2 Settings change-password wired to `PATCH /auth/change-password` (remove fake setTimeout save)
+- [ ] C3 Client detail drawer → `GET /clients/{id}` (`fetchClientApi` + wire)
+- [ ] C4 Full computed status badges (Almost Due / Due / Arrears / Past Maturity / Defaulter) + per-loan installment timeline
+- [ ] C5 Partial-payment → Arrears verified end-to-end + partial-payment warning in repayments UI
+- [ ] C6 `PATCH /admin/loan-products/{id}` (penalty rate/interval config)
+- [ ] C7 Google Maps link input + preview on client form
+- [ ] C8 Branch-scoping verification pass (LO/Manager see own branch only) + close permission-guard gaps (`GET /loan-products`, `/dashboard/stats`, `/notifications`)
 
-### Phase D — PDF & audit trail (P6, P7-C) · ~1 week
+### Phase D — Reports & email notifications (P4–P5) · ~2 weeks
 
-- [ ] D1 `pdf_service.py` (ReportLab) + `GET /clients/{id}/pdf` + "Download Form PDF" button (signatures already captured)
-- [ ] D2 `audit_logs` table + event writes (approve/disburse/close, repayment/fee record+verify, client create) + `GET /audit-logs` + Audit Logs page (replaces dead button)
+- [ ] D1 Financial report (month/year per branch: active clients, disbursed, repayments, P&L, write-offs) + frontend tab, month/year picker, branch filter, export
+- [ ] D2 APScheduler daily job — due/arrears emails (T-2, due-today, arrears, past-maturity) + loan approved/disbursed → LO + penalty snapshot
+- [ ] D3 CSV export for existing reports
 
-### Phase E — Production hardening · ~1 week
+### Phase E — PDF & audit trail (P6, P7-C) · ~1 week
 
-- [ ] E1 Business answers: Lumpsum rate + company section in client form (needed for launch seed)
-- [ ] E2 Backend root `main.py` stub cleanup + register `/health`
-- [ ] E3 S3 for photos/signatures + Neon prod DB + backup strategy + secret-rotation verification (Resend key, `SECRET_KEY`)
-- [ ] E4 Lint debt (84 pre-existing) + fix stale `make deploy` (uvx → /var/opt/uv) + refresh MANUAL_DEPLOY.md
+- [ ] E1 `pdf_service.py` (ReportLab) + `GET /clients/{id}/pdf` + "Download Form PDF" button (signatures already captured)
+- [ ] E2 `audit_logs` table + event writes (approve/disburse/close, repayment/fee record+verify, client create) + `GET /audit-logs` + Audit Logs page (replaces dead button)
 
-### Phase F — Launch gate
+### Phase F — Production hardening · ~1 week
 
-- [ ] F1 Client sign-off on UAT feedback + final walkthrough on prod data
-- [ ] F2 Seed prod DB, flip frontend to prod, go-live
+- [ ] F1 Business answers: Lumpsum rate + company section in client form (needed for launch seed)
+- [ ] F2 Backend root `main.py` stub cleanup + register `/health`
+- [ ] F3 S3 for photos/signatures + Neon prod DB + backup strategy + secret-rotation verification (Resend key, `SECRET_KEY`)
+- [ ] F4 Lint debt (84 pre-existing) + fix stale `make deploy` (uvx → /var/opt/uv) + refresh MANUAL_DEPLOY.md
+
+### Phase G — Launch gate
+
+- [ ] G1 Client sign-off on UAT feedback + final walkthrough on prod data
+- [ ] G2 Seed prod DB, flip frontend to prod, go-live
 
 ---
 
