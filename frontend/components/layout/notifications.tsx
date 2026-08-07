@@ -1,15 +1,20 @@
 "use client";
 
-import React, { useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bell, Flame, Clock, CheckCircle2, ShieldAlert, RefreshCw, Loader2 } from "lucide-react";
+import React from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Bell, Flame, Clock, CheckCircle2, ShieldAlert, RefreshCw, Loader2, CalendarClock, Hourglass } from "lucide-react";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
   PopoverTitle,
 } from "@/components/ui/popover";
-import { fetchNotificationsApi, type AppNotification } from "@/features/clients/api";
+import {
+  fetchNotificationsApi,
+  markAllNotificationsReadApi,
+  markNotificationReadApi,
+  type AppNotification,
+} from "@/features/clients/api";
 
 const PRIORITY_CFG = {
   critical: { color: "text-rose-600", bg: "bg-rose-50 dark:bg-rose-950/20", icon: Flame },
@@ -19,10 +24,12 @@ const PRIORITY_CFG = {
 };
 
 const TYPE_ICON: Record<string, React.ElementType> = {
-  loan_pending:       Clock,
-  loan_approved:      CheckCircle2,
-  repayment_pending:  ShieldAlert,
-  overdue:            Flame,
+  due_today:        Flame,
+  due_tomorrow:     Clock,
+  almost_due:       CalendarClock,
+  arrears:          Hourglass,
+  repayment_pending: ShieldAlert,
+  pending_approval: CheckCircle2,
 };
 
 function timeAgo(dateStr: string) {
@@ -40,7 +47,6 @@ function timeAgo(dateStr: string) {
 }
 
 export function Notifications() {
-  const [readIds, setReadIds] = useState<Set<string>>(new Set());
   const queryClient = useQueryClient();
 
   const { data, isLoading, isError } = useQuery({
@@ -50,15 +56,20 @@ export function Notifications() {
   });
 
   const notifications = data?.notifications ?? [];
-  const unreadCount = notifications.filter(n => !readIds.has(n.id)).length;
+  const unreadCount = data?.unread_count ?? notifications.filter(n => !n.read).length;
 
-  const markAllRead = () => {
-    setReadIds(new Set(notifications.map(n => n.id)));
-  };
+  const markAllReadMutation = useMutation({
+    mutationFn: markAllNotificationsReadApi,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["notifications"] }),
+  });
 
-  const markRead = (id: string) => {
-    setReadIds(prev => new Set([...prev, id]));
-  };
+  const markReadMutation = useMutation({
+    mutationFn: markNotificationReadApi,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["notifications"] }),
+  });
+
+  const markAllRead = () => markAllReadMutation.mutate();
+  const markRead = (id: string) => markReadMutation.mutate(id);
 
   return (
     <Popover>
@@ -116,7 +127,7 @@ export function Notifications() {
             </div>
           ) : (
             notifications.map((notif: AppNotification) => {
-              const isRead = readIds.has(notif.id);
+              const isRead = notif.read;
               const pCfg = PRIORITY_CFG[notif.priority] ?? PRIORITY_CFG.low;
               const Icon = TYPE_ICON[notif.type] ?? pCfg.icon;
               return (

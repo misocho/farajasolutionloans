@@ -14,25 +14,23 @@ PATCH /notifications/read-all — mark all read (clears badge count)
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone, timedelta, date
-from typing import Optional
+from datetime import datetime, timedelta, timezone
+from uuid import UUID
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.dependencies.auth import get_current_user
+from app.core.permissions import get_user_permissions
 from app.db.session import get_db
 from app.models.enums import LoanStatus
 from app.models.loan import Loan
+from app.models.notification_read import NotificationRead
 from app.models.repayment import Repayment
 from app.models.user import User
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
-
-# In-memory store for read state (per user session — lightweight).
-# A proper solution would use a DB table; this keeps it simple for now.
-_read_timestamps: dict[str, datetime] = {}
 
 
 def _priority(days_overdue: int) -> str:
@@ -45,19 +43,12 @@ def _priority(days_overdue: int) -> str:
     return "low"
 
 
-@router.get("")
-def get_notifications(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
+def _build_notifications(db: Session, current_user: User) -> list[dict]:
+    """Compute all live notifications for the current user (no read flags)."""
     now = datetime.now(timezone.utc)
     today = now.date()
     tomorrow = today + timedelta(days=1)
     almost_due_threshold = today + timedelta(days=2)
-
-    # Determine user's last read timestamp
-    user_key = str(current_user.id)
-    last_read = _read_timestamps.get(user_key)
 
     notifications = []
 
@@ -80,7 +71,6 @@ def get_notifications(
             "title": "Loan Due Today",
             "description": f"{loan.client.name} — {loan.loan_number} is due today. Outstanding: KES {loan.total_repayable:,.0f}",
             "time": now.isoformat(),
-            "read": last_read is not None and last_read > now - timedelta(hours=1),
             "loan_id": str(loan.id),
         })
 
@@ -105,7 +95,6 @@ def get_notifications(
             "title": "Due Tomorrow",
             "description": f"{loan.client.name} — {loan.loan_number} is due tomorrow.",
             "time": now.isoformat(),
-            "read": last_read is not None,
             "loan_id": str(loan.id),
         })
 
@@ -129,7 +118,6 @@ def get_notifications(
             "title": "Loan Almost Due",
             "description": f"{loan.client.name} — {loan.loan_number} is due in 2 days ({loan.due_date.date().isoformat() if loan.due_date else ''}).",
             "time": now.isoformat(),
-            "read": last_read is not None,
             "loan_id": str(loan.id),
         })
 
@@ -152,7 +140,6 @@ def get_notifications(
             "title": "Loan in Arrears",
             "description": f"{loan.client.name} — {loan.loan_number} is {days} day{'s' if days != 1 else ''} overdue.",
             "time": now.isoformat(),
-            "read": False,  # Arrears are always unread until resolved
             "loan_id": str(loan.id),
         })
 
@@ -173,13 +160,12 @@ def get_notifications(
             "title": "Payment Awaiting Verification",
             "description": f"KES {float(rep.amount):,.0f} from {rep.client.name if rep.client else 'client'} — recorded and pending Manager/Director approval.",
             "time": rep.date.isoformat() if rep.date else now.isoformat(),
-            "read": last_read is not None,
             "repayment_id": str(rep.id),
             "loan_id": str(rep.loan_id),
         })
 
     # 6. Loans pending approval (for managers/directors)
-    user_perms = {rp.permission.name for ur in current_user.roles for rp in ur.role.permissions}
+    user_perms = get_user_permissions(db, current_user)
     if "loans.approve" in user_perms:
         pending_loans = db.scalars(
             select(Loan)
@@ -197,13 +183,32 @@ def get_notifications(
                 "title": "Loan Awaiting Approval",
                 "description": f"{loan.client.name if loan.client else 'Client'} — {loan.loan_number} (KES {float(loan.amount):,.0f}) is awaiting your approval.",
                 "time": loan.date_submitted.isoformat() if loan.date_submitted else now.isoformat(),
-                "read": last_read is not None,
                 "loan_id": str(loan.id),
             })
 
     # Sort by priority: critical → high → medium → low
     priority_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
     notifications.sort(key=lambda n: priority_order.get(n["priority"], 99))
+    return notifications
+
+
+def _get_read_ids(db: Session, user_id: UUID) -> set[str]:
+    return set(
+        db.scalars(
+            select(NotificationRead.notification_id).where(NotificationRead.user_id == user_id)
+        ).all()
+    )
+
+
+@router.get("")
+def get_notifications(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    notifications = _build_notifications(db, current_user)
+    read_ids = _get_read_ids(db, current_user.id)
+    for n in notifications:
+        n["read"] = n["id"] in read_ids
 
     unread_count = sum(1 for n in notifications if not n["read"])
 
@@ -219,5 +224,27 @@ def mark_all_read(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    _read_timestamps[str(current_user.id)] = datetime.now(timezone.utc)
+    notifications = _build_notifications(db, current_user)
+    db.execute(delete(NotificationRead).where(NotificationRead.user_id == current_user.id))
+    for n in notifications:
+        db.add(NotificationRead(user_id=current_user.id, notification_id=n["id"]))
+    db.commit()
     return {"status": "ok", "message": "All notifications marked as read"}
+
+
+@router.patch("/{notification_id}/read")
+def mark_one_read(
+    notification_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    exists = db.scalar(
+        select(NotificationRead).where(
+            NotificationRead.user_id == current_user.id,
+            NotificationRead.notification_id == notification_id,
+        )
+    )
+    if not exists:
+        db.add(NotificationRead(user_id=current_user.id, notification_id=notification_id))
+        db.commit()
+    return {"status": "ok", "message": "Notification marked as read"}
