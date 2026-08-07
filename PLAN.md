@@ -45,6 +45,7 @@
 
 ### Phase C — Core workflow close-out (P1–P3) · ~2 weeks
 
+- [x] C0 Client branch integrity on registration — form sends `branch_id` (dropdown for Director/System Admin, auto-assigned for scoped LO/Manager); backend validates branch exists (400) + enforces user scope on create/update (403); `GET /clients/{id}` and `POST /loans` scope-checked; clients page gate uses real `clients.create` permission
 - [ ] C1 `POST /auth/complete-profile` + accept-invite → profile step (phone/ID/photo) → PENDING_APPROVAL
 - [ ] C2 Settings change-password wired to `PATCH /auth/change-password` (remove fake setTimeout save)
 - [ ] C3 Client detail drawer → `GET /clients/{id}` (`fetchClientApi` + wire)

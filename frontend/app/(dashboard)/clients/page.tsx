@@ -418,22 +418,21 @@ export default function ClientsPage() {
     queryFn: fetchMeApi,
   });
 
-  const getRole = (user: any) => {
-    if (!user) return "";
-    if (user.role) return user.role;
-    if (user.roles && user.roles.length > 0) return user.roles[0];
-    if (user.employee_number?.includes("DIR")) return "Director";
-    if (user.employee_number?.includes("SYS")) return "System Admin";
-    if (user.employee_number?.includes("LO")) return "Loan Officer";
-    if (user.employee_number?.includes("MGR")) return "Manager";
-    return "Auditor";
-  };
-
-  const userRole = getRole(currentUser);
-  const isAuthorized = ["Director", "System Admin", "Loan Officer"].includes(userRole);
+  const canRegister = (currentUser?.permissions ?? []).includes("clients.create");
 
   // ── Fetch clients ───────────────────────────────────────────────────────────
-  const { selectedBranchId } = useBranch();
+  const { selectedBranchId, branches } = useBranch();
+
+  // ── Branch assignment for new clients ───────────────────────────────────────
+  const isBranchScoped = (currentUser?.branch_ids?.length ?? 0) > 0;
+  const [formBranchId, setFormBranchId] = useState("");
+
+  const initialBranchId =
+    selectedBranchId !== "all" ? selectedBranchId : (branches[0]?.id ?? "");
+  if (!formBranchId && initialBranchId) {
+    setFormBranchId(initialBranchId);
+  }
+
   const { data: clients = [], isLoading: clientsLoading } = useQuery({
     queryKey: ["clients", selectedBranchId],
     queryFn: () => fetchClientsApi(selectedBranchId),
@@ -585,6 +584,7 @@ export default function ClientsPage() {
   const validateStep = (s: number): string | null => {
     switch (s) {
       case 1:
+        if (!formBranchId) return "Select the branch for this client.";
         if (!personalInfo.fullName) return "Full name is required.";
         if (!personalInfo.idNo) return "ID number is required.";
         if (!personalInfo.phone) return "Phone number is required.";
@@ -646,6 +646,7 @@ export default function ClientsPage() {
     }
 
     clientMutation.mutate({
+      branch_id: formBranchId || undefined,
       name: personalInfo.fullName,
       phone: personalInfo.phone,
       email: `${personalInfo.fullName.toLowerCase().replace(/\s+/g, "")}@faraja.co.ke`,
@@ -735,7 +736,7 @@ export default function ClientsPage() {
   });
 
   // ── Access Gate ─────────────────────────────────────────────────────────────
-  if (currentUser && !isAuthorized) {
+  if (currentUser && !canRegister) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[70vh] p-8 text-center bg-white dark:bg-zinc-900 border border-zinc-150 dark:border-zinc-800 rounded-[28px] max-w-xl mx-auto shadow-md select-none">
         <div className="p-4 bg-rose-500/10 text-rose-500 rounded-3xl mb-6">
@@ -745,7 +746,7 @@ export default function ClientsPage() {
           Access Level Restricted
         </h2>
         <p className="text-zinc-500 mt-2 text-sm max-w-sm">
-          Client onboarding is restricted to Loan Officers, System Admins, and Directors.
+          Client onboarding requires the clients.create permission.
         </p>
         <Button onClick={() => (window.location.href = "/dashboard")} className="mt-6 bg-[#0D44A2] hover:bg-[#0A3682] text-white px-6 rounded-xl">
           Return to Dashboard
@@ -919,6 +920,31 @@ export default function ClientsPage() {
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="sm:col-span-2 space-y-1">
+                      <Label className="text-xs font-semibold">
+                        Branch <span className="text-rose-500">*</span>
+                      </Label>
+                      <select
+                        value={formBranchId}
+                        onChange={(e) => setFormBranchId(e.target.value)}
+                        disabled={isBranchScoped}
+                        className="w-full h-10 border border-zinc-200/80 bg-zinc-50/50 rounded-xl text-sm px-3 focus:outline-primary dark:bg-zinc-900 dark:border-zinc-800 disabled:opacity-60"
+                      >
+                        {branches.length === 0 && (
+                          <option value="">Loading branches...</option>
+                        )}
+                        {branches.map((b) => (
+                          <option key={b.id} value={b.id}>
+                            {b.name}
+                          </option>
+                        ))}
+                      </select>
+                      {isBranchScoped && (
+                        <p className="text-[10px] text-zinc-400">
+                          Assigned to your branch automatically.
+                        </p>
+                      )}
+                    </div>
                     <div className="sm:col-span-2 space-y-1">
                       <Label className="text-xs font-semibold">Full Names (as on ID) <span className="text-rose-500">*</span></Label>
                       <Input value={personalInfo.fullName} onChange={(e) => setPersonalInfo({ ...personalInfo, fullName: e.target.value })} placeholder="e.g. Mary Atieno Onyango" required />

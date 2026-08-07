@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.api.dependencies.auth import get_current_user
 from app.core.permissions import get_user_branch_ids, get_user_permissions
 from app.db.session import get_db
+from app.models.branch import Branch
 from app.models.client import Client
 from app.models.enums import LoanStatus, PaymentMode
 from app.models.fee_payment import FeePayment
@@ -71,6 +72,41 @@ def _scoped_expr(column, scope: list | None):
     if scope is None:
         return None
     return column.in_(scope) if scope else False
+
+
+def _assert_branch_visible(user: User, branch_id: UUID | None) -> None:
+    """403 when a scoped user cannot access the branch a record belongs to."""
+    branch_ids = get_user_branch_ids(user)
+    if branch_ids is not None and (branch_id is None or branch_id not in branch_ids):
+        raise HTTPException(status_code=403, detail="Not allowed to access that branch.")
+
+
+def _resolve_branch_assignment(
+    user: User, branch_id: UUID | None, db: Session, *, fallback: UUID | None = None
+) -> UUID:
+    """Resolve the branch a new record gets assigned to, enforcing user scope.
+
+    Scoped users (LO/Manager): default to their first branch; an explicit
+    branch outside their scope is a 403. Unrestricted users: an explicit
+    branch must exist (400); missing branch falls back or is a 400.
+    """
+    branch_ids = get_user_branch_ids(user)
+    if branch_ids is not None:
+        if branch_id is None:
+            if not branch_ids:
+                raise HTTPException(status_code=403, detail="No branch assigned to your account.")
+            return branch_ids[0]
+        if branch_id not in branch_ids:
+            raise HTTPException(status_code=403, detail="Not allowed to assign that branch.")
+        return branch_id
+    if branch_id is None:
+        if fallback is not None:
+            return fallback
+        raise HTTPException(status_code=400, detail="branch_id is required.")
+    branch = db.scalar(select(Branch).where(Branch.id == branch_id))
+    if not branch:
+        raise HTTPException(status_code=400, detail="Branch not found.")
+    return branch_id
 
 
 # ── CLIENTS ────────────────────────────────────────────────────────────────────
@@ -269,6 +305,7 @@ def get_client(
     client = db.scalar(select(Client).where(Client.id == client_id))
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
+    _assert_branch_visible(current_user, client.branch_id)
     return _serialize_client(client)
 
 
@@ -280,10 +317,12 @@ def create_client(
 ):
     _require_permission(db, current_user, "clients.create")
     client_number = loan_service._next_client_number(db)
+    data = request.model_dump()
+    data["branch_id"] = _resolve_branch_assignment(current_user, request.branch_id, db)
     client = Client(
         client_number=client_number,
         registered_by_id=current_user.id,
-        **request.model_dump(),
+        **data,
     )
     db.add(client)
     db.commit()
@@ -302,7 +341,10 @@ def update_client(
     client = db.scalar(select(Client).where(Client.id == client_id))
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
+    _assert_branch_visible(current_user, client.branch_id)
     data = request.model_dump(exclude_unset=True)
+    if "branch_id" in data:
+        data["branch_id"] = _resolve_branch_assignment(current_user, data["branch_id"], db)
     for k, v in data.items():
         if isinstance(v, list):
             setattr(client, k, [i.model_dump() if hasattr(i, "model_dump") else i for i in v])
@@ -530,6 +572,7 @@ def create_loan(
     client = db.scalar(select(Client).where(Client.id == request.client_id))
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
+    _assert_branch_visible(current_user, client.branch_id)
 
     product = db.scalar(select(LoanProduct).where(LoanProduct.id == request.loan_product_id))
     if not product:
@@ -553,7 +596,9 @@ def create_loan(
         loan_number=loan_service._next_loan_number(db),
         client_id=request.client_id,
         loan_product_id=request.loan_product_id,
-        branch_id=request.branch_id or client.branch_id,
+        branch_id=_resolve_branch_assignment(
+            current_user, request.branch_id, db, fallback=client.branch_id
+        ),
         amount=amount,
         application_fee=fee,
         duration_days=product.duration_days,

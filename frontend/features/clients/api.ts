@@ -102,6 +102,7 @@ export interface Client {
   phone: string;
   email?: string;
   id_no?: string;
+  branch_id?: string;
   pin?: string;
   gender?: string;
   marital_status?: string;
