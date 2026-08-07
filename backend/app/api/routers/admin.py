@@ -15,6 +15,7 @@ from app.models.user_invite import UserInvite, InviteStatus
 from app.models.enums import UserStatus
 from app.schemas.users import (
     UserAdminResponse,
+    UserAdminDetailResponse,
     RoleResponse,
     PermissionResponse,
     UpdateUserRolesRequest,
@@ -23,6 +24,7 @@ from app.schemas.users import (
     UserInviteResponse,
     UpdateUserStatusRequest,
 )
+from app.core.permissions import get_user_permissions
 from app.services import invite_service
 from app.services.email_service import send_account_approved_email, send_password_reset_email
 from app.services.invite_service import InviteError
@@ -112,6 +114,27 @@ def cancel_invite(
     invite.status = InviteStatus.CANCELLED
     db.commit()
     return {"status": "success", "message": f"Invite for {invite.email} cancelled"}
+
+
+@router.get("/users/{user_id}", response_model=UserAdminDetailResponse)
+def get_user_detail(
+    user_id: UUID,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(check_is_director),
+):
+    user = db.scalar(
+        select(User)
+        .options(
+            joinedload(User.roles).joinedload(UserRole.role),
+            joinedload(User.branches).joinedload(UserBranch.branch),
+        )
+        .where(User.id == user_id)
+    )
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    data = UserAdminDetailResponse.model_validate(user)
+    data.permissions = sorted(get_user_permissions(db, user))
+    return data
 
 
 # ── User Status Management ─────────────────────────────────────────────────────

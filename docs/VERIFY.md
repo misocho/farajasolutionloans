@@ -84,6 +84,11 @@ TOK_MGR=$(curl -s -X POST $BASE/auth/login -H "Content-Type: application/json" \
 | Any endpoint, no/invalid token | — | 401 |
 | Any permission-less endpoint | ACC | 403 |
 | `GET /auth/me` | MGR | 200, `branch_ids` = [Mombasa], `permissions` populated |
+| `GET /admin/users` | SYS | 200 (U1: SysAdmin admitted; LO → 403) |
+| `GET /admin/users/{id}` | DIR/SYS | 200, detail + full `permissions` list |
+| `GET /admin/users/{id}` | LO | 403 |
+| `GET /admin/users/{bogus-uuid}` | DIR | 404 |
+| `PUT /admin/roles/{id}/permissions` | DIR | 200, `/auth/me` of affected user reflects change instantly |
 
 ## Money workflow smoke (full loan lifecycle)
 

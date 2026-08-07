@@ -30,6 +30,13 @@ export interface AdminUser {
   branches: AdminUserBranch[];
 }
 
+export interface AdminUserDetail extends AdminUser {
+  permissions: string[];
+  phone: string | null;
+  id_no: string | null;
+  created_at: string | null;
+}
+
 export interface AdminRole {
   id: string;
   name: string;
@@ -45,6 +52,11 @@ export interface AdminPermission {
 
 export async function fetchAdminUsersApi(): Promise<AdminUser[]> {
   const response = await api.get<AdminUser[]>("/admin/users");
+  return response.data;
+}
+
+export async function fetchAdminUserApi(userId: string): Promise<AdminUserDetail> {
+  const response = await api.get<AdminUserDetail>(`/admin/users/${userId}`);
   return response.data;
 }
 

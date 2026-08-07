@@ -58,6 +58,13 @@ class UserAdminResponse(BaseModel):
     branches: list[UserBranchDetailResponse]
 
 
+class UserAdminDetailResponse(UserAdminResponse):
+    permissions: list[str] = []
+    phone: str | None = None
+    id_no: str | None = None
+    created_at: datetime | None = None
+
+
 # ── Role/Permission Requests ──────────────────────────────────────────────────
 
 class UpdateUserRolesRequest(BaseModel):

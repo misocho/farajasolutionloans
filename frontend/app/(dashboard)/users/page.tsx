@@ -24,6 +24,7 @@ import { toast } from "sonner";
 import { fetchMeApi } from "@/features/auth/api";
 import {
   fetchAdminUsersApi,
+  fetchAdminUserApi,
   fetchAdminRolesApi,
   fetchAdminPermissionsApi,
   fetchRolePermissionsApi,
@@ -34,11 +35,13 @@ import {
   cancelInviteApi,
   approveUserApi,
   type AdminUser,
+  type AdminUserDetail,
   type AdminRole,
   type AdminPermission,
   type InviteUserPayload,
 } from "@/features/admin/api";
 import { fetchBranchesApi } from "@/features/clients/api";
+import { formatDate } from "@/app/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -51,6 +54,9 @@ export default function UsersAdminPage() {
   // State for User Role Edit Modal
   const [selectedUser, setSelectedUser] = useState<AdminUser | null>(null);
   const [editedUserRoles, setEditedUserRoles] = useState<string[]>([]);
+
+  // State for User Detail Drawer
+  const [viewUser, setViewUser] = useState<AdminUser | null>(null);
 
   // State for Role Permission Editor
   const [selectedRole, setSelectedRole] = useState<AdminRole | null>(null);
@@ -111,6 +117,14 @@ export default function UsersAdminPage() {
   });
 
   const adminQueryError = usersError || rolesError || permissionsError || invitesError;
+
+  // Detail for the user drawer
+  const { data: viewUserDetail, isLoading: viewUserLoading, isError: viewUserError } = useQuery({
+    queryKey: ["admin-user-detail", viewUser?.id],
+    queryFn: () => fetchAdminUserApi(viewUser!.id),
+    enabled: !!viewUser,
+  });
+  const viewUserData: AdminUserDetail | null = viewUserDetail ?? null;
 
   const { data: branches } = useQuery({
     queryKey: ["branches-list"],
@@ -504,6 +518,14 @@ export default function UsersAdminPage() {
                               Approve
                             </Button>
                           )}
+                          <Button
+                            onClick={() => setViewUser(user)}
+                            variant="outline"
+                            size="sm"
+                            className="rounded-xl border-zinc-200 text-zinc-700 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 h-8"
+                          >
+                            View
+                          </Button>
                           <Button
                             onClick={() => handleOpenEditUser(user)}
                             variant="outline"
@@ -899,6 +921,111 @@ export default function UsersAdminPage() {
                 </Button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── USER DETAIL DRAWER ───────────────────────────────────────── */}
+      {viewUser && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-zinc-950/40 backdrop-blur-xs animate-fade-in">
+          <div className="bg-white dark:bg-zinc-900 border-l border-zinc-200 dark:border-zinc-800 w-full max-w-xl h-full shadow-2xl overflow-y-auto animate-in slide-in-from-right duration-250">
+            <div className="sticky top-0 bg-white dark:bg-zinc-900 border-b border-zinc-100 dark:border-zinc-800 px-5 py-4 flex justify-between items-start z-10">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-[#0D44A2]/10 rounded-xl">
+                  <UserCog className="size-5 text-[#0D44A2]" />
+                </div>
+                <div>
+                  <h3 className="font-black text-zinc-900 dark:text-zinc-50 text-base">{viewUser.first_name} {viewUser.last_name}</h3>
+                  <p className="text-xs font-bold text-zinc-400">{viewUser.employee_number} · {viewUser.email}</p>
+                </div>
+              </div>
+              <button onClick={() => setViewUser(null)} className="p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full cursor-pointer">
+                <X className="size-5 text-zinc-500" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-6 text-xs text-zinc-700 dark:text-zinc-300">
+              {viewUserLoading ? (
+                <div className="flex items-center justify-center py-16">
+                  <Loader2 className="animate-spin text-[#0D44A2] size-7" />
+                </div>
+              ) : viewUserError || !viewUserData ? (
+                <div className="flex flex-col items-center justify-center py-16 gap-3 text-zinc-400">
+                  <ShieldAlert className="size-8 text-rose-400" />
+                  <p className="text-xs">Couldn't load user details.</p>
+                  <Button
+                    onClick={() => queryClient.invalidateQueries({ queryKey: ["admin-user-detail", viewUser.id] })}
+                    variant="outline"
+                    size="sm"
+                    className="h-8 rounded-xl"
+                  >
+                    <RefreshCw className="size-3 mr-1" /> Retry
+                  </Button>
+                </div>
+              ) : (
+                <>
+                  {/* Identity */}
+                  <section className="space-y-2">
+                    <p className="text-[#0D44A2] font-black uppercase tracking-wider text-[10px] flex items-center gap-1.5"><UserCog className="size-3.5" />Identity</p>
+                    <div className="grid grid-cols-2 gap-3 bg-zinc-50/40 p-3 rounded-2xl border border-zinc-100 dark:border-zinc-800">
+                      {[
+                        ["Employee No.", viewUserData.employee_number],
+                        ["Email", viewUserData.email],
+                        ["Phone", viewUserData.phone || "N/A"],
+                        ["National ID", viewUserData.id_no || "N/A"],
+                        ["Registered", viewUserData.created_at ? formatDate(viewUserData.created_at) : "N/A"],
+                        ["Last Login", viewUserData.last_login_at ? formatDate(viewUserData.last_login_at, { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "Never"],
+                      ].map(([label, val]) => (
+                        <div key={label} className="flex flex-col">
+                          <span className="text-[10px] text-zinc-400 font-semibold">{label}</span>
+                          <span className="font-bold text-zinc-800 dark:text-zinc-200 break-words">{val}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+
+                  {/* Status & Roles */}
+                  <section className="space-y-2">
+                    <p className="text-[#0D44A2] font-black uppercase tracking-wider text-[10px] flex items-center gap-1.5"><Building className="size-3.5" />Status, Roles & Branches</p>
+                    <div className="flex flex-col gap-2">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {viewUserData.status && (
+                          <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold ${userStatusCfg[viewUserData.status]?.className ?? "bg-zinc-100 text-zinc-600"}`}>
+                            {userStatusCfg[viewUserData.status]?.label ?? viewUserData.status}
+                          </span>
+                        )}
+                        {viewUserData.roles.map((ur) => (
+                          <span key={ur.role.id} className="px-2 py-0.5 rounded-lg bg-[#0D44A2]/10 border border-[#0D44A2]/20 text-[10px] font-bold text-[#0D44A2]">
+                            {ur.role.name}
+                          </span>
+                        ))}
+                        {(viewUserData.branches.length === 0 ? ["No branch assigned"] : viewUserData.branches.map((b) => b.branch.name)).map((name, i) => (
+                          <span key={`${name}-${i}`} className="px-2 py-0.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-[10px] font-bold text-zinc-600 dark:text-zinc-300">
+                            {name}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </section>
+
+                  {/* Permissions */}
+                  <section className="space-y-2">
+                    <p className="text-[#0D44A2] font-black uppercase tracking-wider text-[10px] flex items-center gap-1.5"><Key className="size-3.5" />Permissions ({viewUserData.permissions.length})</p>
+                    <div className="flex flex-wrap gap-1.5 bg-zinc-50/40 p-3 rounded-2xl border border-zinc-100 dark:border-zinc-800">
+                      {viewUserData.permissions.length === 0 ? (
+                        <span className="text-[10px] text-zinc-400">No permissions assigned.</span>
+                      ) : (
+                        viewUserData.permissions.map((perm) => (
+                          <span key={perm} className="px-2 py-0.5 rounded-lg bg-emerald-50 border border-emerald-200 text-[10px] font-bold text-emerald-700 dark:bg-emerald-950/20 dark:border-emerald-800 dark:text-emerald-300">
+                            {perm}
+                          </span>
+                        ))
+                      )}
+                    </div>
+                  </section>
+                </>
+              )}
+            </div>
           </div>
         </div>
       )}
