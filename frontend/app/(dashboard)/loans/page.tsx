@@ -24,6 +24,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { StatusBadge } from "@/components/ui/status-badge";
+import { InstallmentTimeline } from "@/components/loans/installment-timeline";
 
 interface ApiError {
   response?: { data?: { detail?: string } };
@@ -36,21 +38,6 @@ const SECTOR_OPTIONS = [
   "Construction", "Healthcare & Services", "Education",
   "Manufacturing", "Technology", "Hospitality & Tourism", "Other",
 ];
-
-const STATUS_CFG: Record<LoanStatus, { color: string; bg: string; icon: React.ElementType; label: string }> = {
-  Pending:      { color: "text-amber-700 dark:text-amber-400", bg: "bg-amber-50 border-amber-200 dark:bg-amber-950/20 dark:border-amber-800", icon: Clock, label: "Pending Approval" },
-  Approved:     { color: "text-blue-700 dark:text-blue-400", bg: "bg-blue-50 border-blue-200 dark:bg-blue-950/20 dark:border-blue-800", icon: CheckCircle2, label: "Approved" },
-  Disbursed:    { color: "text-emerald-700 dark:text-emerald-400", bg: "bg-emerald-50 border-emerald-200 dark:bg-emerald-950/20 dark:border-emerald-800", icon: ArrowUpRight, label: "Disbursed" },
-  "Almost Due": { color: "text-orange-700 dark:text-orange-400", bg: "bg-orange-50 border-orange-200 dark:bg-orange-950/20 dark:border-orange-800", icon: Clock, label: "Almost Due" },
-  Due:          { color: "text-[#F57424] dark:text-orange-400", bg: "bg-orange-50 border-orange-200 dark:bg-orange-950/20 dark:border-orange-800", icon: AlertTriangle, label: "Due Today" },
-  Performing:   { color: "text-emerald-700 dark:text-emerald-400", bg: "bg-emerald-50 border-emerald-200 dark:bg-emerald-950/20 dark:border-emerald-800", icon: TrendingUp, label: "Performing" },
-  Arrears:      { color: "text-rose-700 dark:text-rose-400", bg: "bg-rose-50 border-rose-200 dark:bg-rose-950/20 dark:border-rose-800", icon: AlertTriangle, label: "In Arrears" },
-  "Past Maturity": { color: "text-rose-700 dark:text-rose-400", bg: "bg-rose-50 border-rose-200 dark:bg-rose-950/20 dark:border-rose-800", icon: XCircle, label: "Past Maturity" },
-  Defaulter:    { color: "text-rose-700 dark:text-rose-400", bg: "bg-rose-50 border-rose-200 dark:bg-rose-950/20 dark:border-rose-800", icon: Flame, label: "Defaulter" },
-  Paid:         { color: "text-emerald-700 dark:text-emerald-400", bg: "bg-emerald-50 border-emerald-200 dark:bg-emerald-950/20 dark:border-emerald-800", icon: CheckCircle2, label: "Paid" },
-  Rejected:     { color: "text-rose-700 dark:text-rose-400", bg: "bg-rose-50 border-rose-200 dark:bg-rose-950/20 dark:border-rose-800", icon: XCircle, label: "Rejected" },
-  Closed:       { color: "text-zinc-600 dark:text-zinc-400", bg: "bg-zinc-100 border-zinc-200 dark:bg-zinc-800 dark:border-zinc-700", icon: BadgeCheck, label: "Closed" },
-};
 
 const WORKFLOW_STEPS: LoanStatus[] = ["Pending", "Approved", "Disbursed", "Closed"];
 
@@ -74,16 +61,6 @@ function useRole() {
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
-
-function StatusBadge({ status }: { status: LoanStatus }) {
-  const cfg = STATUS_CFG[status];
-  const Icon = cfg.icon;
-  return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg border text-[10px] font-bold ${cfg.bg} ${cfg.color}`}>
-      <Icon className="size-3" />{cfg.label}
-    </span>
-  );
-}
 
 function WorkflowBar({ status }: { status: LoanStatus }) {
   if (status === "Rejected") {
@@ -236,6 +213,13 @@ function LoanDrawer({
                 color={loan.outstanding > 0 ? "text-rose-600" : "text-emerald-600"} bold />
               <MoneyRow label="Application Fee" value={formatKES(loan.application_fee)} color="text-zinc-400" />
             </div>
+
+            {/* Installment Schedule */}
+            {loan.installments && loan.installments.length > 0 && (
+              <div className="bg-zinc-50 dark:bg-zinc-850/30 rounded-2xl border border-zinc-100 dark:border-zinc-800 p-4 space-y-3">
+                <InstallmentTimeline installments={loan.installments} />
+              </div>
+            )}
 
             {/* Overdue / Penalty */}
             {loan.is_overdue && (

@@ -30,6 +30,8 @@ import {
   BadgeCheck,
   ImageIcon,
   RefreshCw,
+  Banknote,
+  ChevronDown,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -38,6 +40,8 @@ import { useBranch } from "@/components/layout/branch-selector";
 import {
   fetchClientsApi,
   fetchClientApi,
+  fetchClientLoansApi,
+  fetchLoanApi,
   createClientApi,
   type Client,
   type NextOfKin,
@@ -48,6 +52,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { StatusBadge } from "@/components/ui/status-badge";
+import { InstallmentTimeline } from "@/components/loans/installment-timeline";
 import { formatKES, formatDate } from "@/app/lib/format";
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -404,6 +410,48 @@ function DependantList({
   );
 }
 
+// ── Loan Detail Panel (inline expansion in client drawer) ──────────────────────
+
+function LoanInstallmentPanel({ loanId }: { loanId: string }) {
+  const { data: loan, isLoading, isError, refetch } = useQuery({
+    queryKey: ["loan", loanId],
+    queryFn: () => fetchLoanApi(loanId),
+  });
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-5 border-t border-zinc-100 dark:border-zinc-800">
+        <Loader2 className="animate-spin text-[#0D44A2] size-5" />
+      </div>
+    );
+  }
+  if (isError || !loan) {
+    return (
+      <div className="flex items-center justify-between py-4 px-3 border-t border-zinc-100 dark:border-zinc-800">
+        <p className="text-xs font-bold text-rose-600">Could not load loan details.</p>
+        <button onClick={() => refetch()} className="text-[10px] font-bold text-[#0D44A2] underline cursor-pointer">Retry</button>
+      </div>
+    );
+  }
+  return (
+    <div className="border-t border-zinc-100 dark:border-zinc-800 p-3.5 space-y-3">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <StatusBadge status={loan.status} />
+        {loan.is_overdue && (
+          <span className="text-[10px] font-bold text-rose-600">{loan.days_overdue}d overdue · Penalty {formatKES(loan.penalty_amount)}</span>
+        )}
+      </div>
+      {loan.installments && loan.installments.length > 0 ? (
+        <InstallmentTimeline installments={loan.installments} />
+      ) : (
+        <p className="text-[11px] text-zinc-400 italic">
+          {loan.status === "Disbursed" ? "Schedule not generated yet." : "Installment schedule is generated at disbursement."}
+        </p>
+      )}
+    </div>
+  );
+}
+
 // ── Main Component ─────────────────────────────────────────────────────────────
 
 export default function ClientsPage() {
@@ -442,6 +490,7 @@ export default function ClientsPage() {
 
   // ── Deep-link: /clients?client=<id> opens the detail drawer ────────────────
   const [detailClientId, setDetailClientId] = useState<string | null>(null);
+  const [expandedLoanId, setExpandedLoanId] = useState<string | null>(null);
   if (typeof window !== "undefined" && !selectedClient && detailClientId === null) {
     const param = new URLSearchParams(window.location.search).get("client");
     if (param) {
@@ -456,6 +505,12 @@ export default function ClientsPage() {
     enabled: !!detailClientId,
   });
   const detailClient = clientDetailQuery.data ?? selectedClient;
+
+  const clientLoansQuery = useQuery({
+    queryKey: ["client-loans", detailClientId],
+    queryFn: () => fetchClientLoansApi(detailClientId!),
+    enabled: !!detailClientId,
+  });
 
   // ── Step 1: Personal & Residential ─────────────────────────────────────────
   const [personalInfo, setPersonalInfo] = useState({
@@ -1450,6 +1505,49 @@ export default function ClientsPage() {
 
               {detailClient ? (
                 <>
+              {/* Loans */}
+              <section className="space-y-2">
+                <p className="text-[#0D44A2] font-black uppercase tracking-wider text-[10px] flex items-center gap-1.5"><Banknote className="size-3.5" />Loans ({clientLoansQuery.data?.length ?? 0})</p>
+                {clientLoansQuery.isLoading ? (
+                  <div className="flex items-center justify-center py-6">
+                    <Loader2 className="animate-spin text-[#0D44A2] size-5" />
+                  </div>
+                ) : clientLoansQuery.isError ? (
+                  <div className="flex items-center justify-between p-3 rounded-xl border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800">
+                    <p className="text-xs font-bold text-amber-800 dark:text-amber-300">Could not load loans.</p>
+                    <button onClick={() => clientLoansQuery.refetch()} className="text-[10px] font-bold text-amber-800 underline cursor-pointer">Retry</button>
+                  </div>
+                ) : clientLoansQuery.data && clientLoansQuery.data.length > 0 ? (
+                  <div className="flex flex-col gap-2">
+                    {clientLoansQuery.data.map((loan) => (
+                      <div key={loan.id} className="rounded-2xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50/40 overflow-hidden">
+                        <button
+                          onClick={() => setExpandedLoanId(expandedLoanId === loan.id ? null : loan.id)}
+                          className="w-full flex items-center justify-between gap-2 p-3 text-left cursor-pointer"
+                        >
+                          <div className="min-w-0">
+                            <p className="text-xs font-bold text-zinc-900 dark:text-zinc-100 truncate">
+                              {loan.loan_number} <span className="text-zinc-400 font-semibold">· {loan.product ?? loan.sector}</span>
+                            </p>
+                            <p className="text-[10px] text-zinc-400">
+                              {formatKES(loan.amount)}{loan.due_date ? ` · Due ${formatDate(loan.due_date)}` : ""}
+                              {loan.outstanding > 0 ? ` · Outstanding ${formatKES(loan.outstanding)}` : ""}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <StatusBadge status={loan.status} />
+                            <ChevronDown className={`size-4 text-zinc-400 transition-transform ${expandedLoanId === loan.id ? "rotate-180" : ""}`} />
+                          </div>
+                        </button>
+                        {expandedLoanId === loan.id && <LoanInstallmentPanel loanId={loan.id} />}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="text-zinc-400 text-[11px] italic">No loans recorded for this client.</span>
+                )}
+              </section>
+
               {/* Personal */}
               <section className="space-y-2">
                 <p className="text-[#0D44A2] font-black uppercase tracking-wider text-[10px] flex items-center gap-1.5"><Home className="size-3.5" />Personal & Residency</p>

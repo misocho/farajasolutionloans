@@ -61,6 +61,7 @@ export interface Loan {
   amount: number;
   duration_days: number;
   application_fee: number;
+  product?: string | null;
   notes?: string;
   submitted_by?: string;
   approved_by?: string | null;
@@ -81,6 +82,15 @@ export interface Loan {
   penalty_amount: number;
   // When fetched by ID
   repayments?: Repayment[];
+  installments?: Installment[];
+}
+
+export interface Installment {
+  id: string;
+  due_date: string;
+  amount: number;
+  status: "Pending" | "Paid" | "Missed" | "Late";
+  paid_at: string | null;
 }
 
 export interface LoanProduct {
@@ -197,6 +207,13 @@ export async function fetchLoansApi(branchId?: string): Promise<Loan[]> {
 
 export async function fetchLoanApi(id: string): Promise<Loan> {
   const res = await api.get<Loan>(`/loans/${id}`);
+  return res.data;
+}
+
+export async function fetchClientLoansApi(clientId: string): Promise<Loan[]> {
+  const res = await api.get<Loan[]>("/loans", {
+    params: { client_id: clientId },
+  });
   return res.data;
 }
 
