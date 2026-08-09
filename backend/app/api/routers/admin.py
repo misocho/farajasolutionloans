@@ -13,6 +13,7 @@ from app.models.role_permission import RolePermission
 from app.models.user_branch import UserBranch
 from app.models.user_invite import UserInvite, InviteStatus
 from app.models.enums import UserStatus
+from app.models.loan_product import LoanProduct
 from app.schemas.users import (
     UserAdminResponse,
     UserAdminDetailResponse,
@@ -24,6 +25,7 @@ from app.schemas.users import (
     UserInviteResponse,
     UpdateUserStatusRequest,
 )
+from app.schemas.loan_products import LoanProductResponse, LoanProductUpdate
 from app.core.permissions import get_user_permissions
 from app.services import invite_service
 from app.services.email_service import send_account_approved_email, send_password_reset_email
@@ -294,5 +296,36 @@ def update_role_permissions(
         db.add(RolePermission(role_id=role_id, permission_id=p.id))
     db.commit()
     return {"status": "success", "message": f"Updated permissions for role {role.name}"}
+
+
+# ── Loan Products ──────────────────────────────────────────────────────────────
+
+@router.get("/loan-products", response_model=list[LoanProductResponse])
+def get_admin_loan_products(
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(check_is_director),
+):
+    products = db.scalars(select(LoanProduct).order_by(LoanProduct.name)).all()
+    return products
+
+
+@router.patch("/loan-products/{product_id}", response_model=LoanProductResponse)
+def update_loan_product(
+    product_id: UUID,
+    payload: LoanProductUpdate,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(check_is_director),
+):
+    product = db.scalar(select(LoanProduct).where(LoanProduct.id == product_id))
+    if product is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Loan product not found")
+    updates = payload.model_dump(exclude_unset=True)
+    if not updates:
+        raise HTTPException(status_code=400, detail="Nothing to update")
+    for key, value in updates.items():
+        setattr(product, key, value)
+    db.commit()
+    db.refresh(product)
+    return product
 
 

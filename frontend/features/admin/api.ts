@@ -141,3 +141,34 @@ export async function approveUserApi(userId: string): Promise<{ status: string; 
   const response = await api.patch<{ status: string; message: string }>(`/admin/users/${userId}/approve`);
   return response.data;
 }
+
+// ── Loan Products (admin) ────────────────────────────────────────────────────
+
+export interface LoanProduct {
+  id: string;
+  name: string;
+  product_type: string;
+  duration_days: number;
+  interest_rate: number;
+  penalty_rate: number;
+  penalty_interval_days: number;
+  max_penalty_amount: number | null;
+  is_active: boolean;
+}
+
+export interface LoanProductUpdatePayload {
+  penalty_rate?: number;
+  penalty_interval_days?: number;
+  max_penalty_amount?: number | null;
+  is_active?: boolean;
+}
+
+export async function fetchAdminLoanProductsApi(): Promise<LoanProduct[]> {
+  const response = await api.get<LoanProduct[]>("/admin/loan-products");
+  return response.data;
+}
+
+export async function updateLoanProductApi(id: string, data: LoanProductUpdatePayload): Promise<LoanProduct> {
+  const response = await api.patch<LoanProduct>(`/admin/loan-products/${id}`, data);
+  return response.data;
+}

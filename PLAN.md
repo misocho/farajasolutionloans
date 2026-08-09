@@ -61,7 +61,7 @@
 - [x] C3 Client detail drawer → `GET /clients/{id}` — new `fetchClientApi`; drawer opens instantly from list snapshot then swaps in fresh detail via `useQuery(["client-detail", id])`; error banner with Retry if refresh fails. Backend: list endpoint now slims base64 media (photos/signatures → null; full payload only in `GET /clients/{id}`)
 - [x] C4 Full computed status badges (Almost Due / Due / Arrears / Past Maturity / Defaulter) + per-loan installment timeline — canonical `components/ui/status-badge.tsx` (loans page + client drawer migrated); shared `components/loans/installment-timeline.tsx` (progress bar + per-installment Paid/Upcoming/Late/Missed pills). Client detail drawer lists the client's loans (`fetchClientLoansApi`, `["client-loans", id]`) with computed badge + outstanding; tapping a loan inline-fetches `["loan", id]` and shows its timeline/penalty. Backend: no change — `GET /loans?client_id=` and `LOAN_OUT` already return `installments`
 - [ ] C5 Partial-payment → Arrears verified end-to-end + partial-payment warning in repayments UI
-- [ ] C6 `PATCH /admin/loan-products/{id}` (penalty rate/interval config)
+- [x] C6 `PATCH /admin/loan-products/{id}` (penalty rate/interval config) — `GET /admin/loan-products` (all incl. inactive) + `PATCH /admin/loan-products/{id}` in `admin.py` (Director/System Admin gate via `check_is_director`); editable: penalty_rate (0–100%), penalty_interval_days (≥1), max_penalty_amount (≥0, null = no cap), is_active; 404/400 on unknown/missing, schema validation via `LoanProductUpdate`; Admin Console gains a "Loan Products" tab (list + edit modal with live-loan warning). Penalty still computed live from the product at assessment time
 - [ ] C7 Google Maps link input + preview on client form
 - [ ] C8 Branch-scoping verification pass (LO/Manager see own branch only) + close permission-guard gaps (`GET /loan-products`, `/dashboard/stats`, `/notifications`)
 
@@ -302,7 +302,7 @@ Director sends invite (Name + Email + Role + Branch)
 - [x] POST `/repayments` (verified=False) + PATCH `/repayments/{id}/verify` — real DB
 - [x] Installment matching on repayment (via `loan_service`)
 - [x] Penalty calc on outstanding (3%/2d)
-- [ ] `PATCH /admin/loan-products/{id}` — Admin edit of penalty_rate / penalty_interval_days — ❌ not built
+- [x] `PATCH /admin/loan-products/{id}` — Admin edit of penalty_rate / penalty_interval_days (shipped 2026-08-09, C6)
 - [ ] Partial payment → installment `Late` + loan `Arrears` status logic — verify implemented end-to-end
 - [ ] **Bug: `repayments.create` permission check uses non-existent permission** (see Known Bugs)
 

@@ -18,6 +18,7 @@ import {
   BadgeCheck,
   Hourglass,
   RefreshCw,
+  Package,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -34,22 +35,28 @@ import {
   fetchInvitesApi,
   cancelInviteApi,
   approveUserApi,
+  fetchAdminLoanProductsApi,
+  updateLoanProductApi,
   type AdminUser,
   type AdminUserDetail,
   type AdminRole,
   type AdminPermission,
   type InviteUserPayload,
+  type LoanProduct,
+  type LoanProductUpdatePayload,
 } from "@/features/admin/api";
 import { fetchBranchesApi } from "@/features/clients/api";
-import { formatDate } from "@/app/lib/format";
+import { formatDate, formatKES } from "@/app/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
+const fmtPct = (rate: number) => `${(rate * 100).toFixed(1).replace(/\.0$/, "")}%`;
+
 
 export default function UsersAdminPage() {
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<"directory" | "permissions">("directory");
+  const [activeTab, setActiveTab] = useState<"directory" | "permissions" | "products">("directory");
 
   // State for User Role Edit Modal
   const [selectedUser, setSelectedUser] = useState<AdminUser | null>(null);
@@ -61,6 +68,13 @@ export default function UsersAdminPage() {
   // State for Role Permission Editor
   const [selectedRole, setSelectedRole] = useState<AdminRole | null>(null);
   const [activeRolePermissions, setActiveRolePermissions] = useState<string[]>([]);
+
+  // State for Loan Product Editor
+  const [editingProduct, setEditingProduct] = useState<LoanProduct | null>(null);
+  const [editPenaltyRatePct, setEditPenaltyRatePct] = useState("3");
+  const [editPenaltyInterval, setEditPenaltyInterval] = useState("2");
+  const [editMaxPenalty, setEditMaxPenalty] = useState("");
+  const [editIsActive, setEditIsActive] = useState(true);
 
   // State for Invite Modal
   const [showInviteModal, setShowInviteModal] = useState(false);
@@ -116,7 +130,13 @@ export default function UsersAdminPage() {
     enabled: userIsAdmin,
   });
 
-  const adminQueryError = usersError || rolesError || permissionsError || invitesError;
+  const { data: products, isLoading: productsLoading, isError: productsError } = useQuery({
+    queryKey: ["admin-products"],
+    queryFn: fetchAdminLoanProductsApi,
+    enabled: userIsAdmin,
+  });
+
+  const adminQueryError = usersError || rolesError || permissionsError || invitesError || productsError;
 
   // Detail for the user drawer
   const { data: viewUserDetail, isLoading: viewUserLoading, isError: viewUserError } = useQuery({
@@ -225,6 +245,60 @@ export default function UsersAdminPage() {
       });
     },
   });
+
+  const updateProductMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: LoanProductUpdatePayload }) =>
+      updateLoanProductApi(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin-products"] });
+      queryClient.invalidateQueries({ queryKey: ["loan-products"] });
+      toast.success("Loan product updated");
+      setEditingProduct(null);
+    },
+    onError: (error: unknown) => {
+      const detail = (error as { response?: { data?: { detail?: unknown } } }).response?.data?.detail;
+      toast.error("Failed to update loan product", {
+        description: typeof detail === "string" ? detail : "Check the values and try again.",
+      });
+    },
+  });
+
+  const handleOpenEditProduct = (product: LoanProduct) => {
+    setEditingProduct(product);
+    setEditPenaltyRatePct(String(product.penalty_rate * 100));
+    setEditPenaltyInterval(String(product.penalty_interval_days));
+    setEditMaxPenalty(product.max_penalty_amount != null ? String(product.max_penalty_amount) : "");
+    setEditIsActive(product.is_active);
+  };
+
+  const handleSaveProduct = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingProduct) return;
+    const rate = Number(editPenaltyRatePct);
+    const interval = Number(editPenaltyInterval);
+    const maxPenalty = editMaxPenalty.trim() === "" ? null : Number(editMaxPenalty);
+    if (Number.isNaN(rate) || rate < 0 || rate > 100) {
+      toast.error("Penalty rate must be between 0% and 100%");
+      return;
+    }
+    if (!Number.isInteger(interval) || interval < 1) {
+      toast.error("Penalty interval must be a whole number of at least 1 day");
+      return;
+    }
+    if (maxPenalty != null && (Number.isNaN(maxPenalty) || maxPenalty < 0)) {
+      toast.error("Max penalty must be zero or more");
+      return;
+    }
+    updateProductMutation.mutate({
+      id: editingProduct.id,
+      data: {
+        penalty_rate: rate / 100,
+        penalty_interval_days: interval,
+        max_penalty_amount: maxPenalty,
+        is_active: editIsActive,
+      },
+    });
+  };
 
   // Security Lock check: Redirect/Lock screen if unauthorized
   if (currentUser && !userIsAdmin) {
@@ -398,6 +472,17 @@ export default function UsersAdminPage() {
             <Key className="size-4" />
             <span>Permissions Matrix</span>
           </button>
+          <button
+            onClick={() => setActiveTab("products")}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+              activeTab === "products"
+                ? "bg-white dark:bg-zinc-900 text-zinc-950 dark:text-zinc-500 shadow-sm"
+                : "text-zinc-500 dark:text-zinc-500 hover:text-zinc-700"
+            }`}
+          >
+            <Package className="size-4" />
+            <span>Loan Products</span>
+          </button>
         </div>
       </div>
 
@@ -415,6 +500,7 @@ export default function UsersAdminPage() {
               queryClient.invalidateQueries({ queryKey: ["admin-roles"] });
               queryClient.invalidateQueries({ queryKey: ["admin-permissions"] });
               queryClient.invalidateQueries({ queryKey: ["admin-invites"] });
+              queryClient.invalidateQueries({ queryKey: ["admin-products"] });
             }}
             variant="outline"
             size="sm"
@@ -734,6 +820,94 @@ export default function UsersAdminPage() {
         </div>
       )}
 
+      {/* Loan Products Tab View */}
+      {activeTab === "products" && (
+        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-[20px] sm:rounded-[24px] p-4 sm:p-6 shadow-sm">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4">
+            <div>
+              <h3 className="font-bold text-zinc-900 dark:text-zinc-50 text-base">Loan Products</h3>
+              <p className="text-xs text-zinc-400 mt-0.5">
+                Penalty rules and product availability. Changes apply to live loans at their next assessment.
+              </p>
+            </div>
+            <span className="text-xs bg-zinc-100 dark:bg-zinc-800 text-zinc-500 px-3 py-1 rounded-full font-semibold self-start sm:self-auto">
+              {products?.length || 0} products
+            </span>
+          </div>
+
+          {productsLoading ? (
+            <div className="flex flex-col items-center justify-center py-16 gap-2 text-zinc-500">
+              <Loader2 className="animate-spin size-8 text-[#0D44A2]" />
+              <span className="text-xs">Loading loan products...</span>
+            </div>
+          ) : productsError || !products ? (
+            <div className="flex flex-col items-center justify-center py-16 gap-2 text-zinc-400">
+              <Package className="size-8" />
+              <p className="text-xs">Could not load loan products.</p>
+              <Button
+                onClick={() => queryClient.invalidateQueries({ queryKey: ["admin-products"] })}
+                variant="outline"
+                size="sm"
+                className="h-8 rounded-xl"
+              >
+                <RefreshCw className="size-3 mr-1" /> Retry
+              </Button>
+            </div>
+          ) : products.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 gap-2 text-zinc-400">
+              <Package className="size-8" />
+              <p className="text-xs">No loan products configured.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {products.map((product) => (
+                <div
+                  key={product.id}
+                  className="rounded-[20px] border border-zinc-200 dark:border-zinc-800 bg-zinc-50/40 p-4 flex flex-col gap-3"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <h4 className="font-black text-zinc-900 dark:text-zinc-50 text-sm truncate">{product.name}</h4>
+                      <p className="text-[10px] font-bold text-zinc-400 mt-0.5">{product.product_type}</p>
+                    </div>
+                    <span className={`shrink-0 px-2 py-0.5 rounded-lg text-[10px] font-bold border ${
+                      product.is_active
+                        ? "bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-950/20 dark:border-emerald-800 dark:text-emerald-300"
+                        : "bg-zinc-100 border-zinc-200 text-zinc-500 dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-400"
+                    }`}>
+                      {product.is_active ? "Active" : "Inactive"}
+                    </span>
+                  </div>
+
+                  <div className="flex flex-col gap-1.5 text-xs">
+                    {[
+                      ["Duration", `${product.duration_days} days`],
+                      ["Interest", fmtPct(product.interest_rate)],
+                      ["Penalty", `${fmtPct(product.penalty_rate)} every ${product.penalty_interval_days} day${product.penalty_interval_days === 1 ? "" : "s"}`],
+                      ["Max penalty", product.max_penalty_amount != null ? formatKES(product.max_penalty_amount) : "None"],
+                    ].map(([label, val]) => (
+                      <div key={label} className="flex justify-between gap-2">
+                        <span className="text-zinc-400 font-semibold">{label}</span>
+                        <span className="font-bold text-zinc-800 dark:text-zinc-200 text-right">{val}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <Button
+                    onClick={() => handleOpenEditProduct(product)}
+                    variant="outline"
+                    size="sm"
+                    className="mt-auto h-9 rounded-xl text-xs font-bold"
+                  >
+                    Edit Penalty Rules
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* --- ADMINISTRATIVE DIALOGS --- */}
 
       {/* Modal: Edit User Roles */}
@@ -918,6 +1092,122 @@ export default function UsersAdminPage() {
                     <Send className="size-4" />
                   )}
                   <span>{inviteMutation.isPending ? "Sending invite..." : "Send Invitation"}</span>
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Edit Loan Product */}
+      {editingProduct && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/40 backdrop-blur-xs animate-fade-in">
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-[20px] sm:rounded-[24px] p-6 w-full max-w-md shadow-2xl animate-in fade-in-50 zoom-in-95 duration-200 text-left">
+            <div className="flex justify-between items-center border-b border-zinc-100 dark:border-zinc-800 pb-3">
+              <div>
+                <h3 className="font-bold text-zinc-900 dark:text-zinc-50 text-base">Edit Penalty Rules</h3>
+                <p className="text-xs text-zinc-400 mt-0.5">
+                  {editingProduct.name} · {editingProduct.duration_days} days · {fmtPct(editingProduct.interest_rate)} interest
+                </p>
+              </div>
+              <button
+                onClick={() => setEditingProduct(null)}
+                className="p-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full cursor-pointer focus:outline-none"
+              >
+                <X className="size-5 text-zinc-500" />
+              </button>
+            </div>
+
+            <div className="mt-4 p-3 rounded-2xl border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/20">
+              <p className="text-[11px] font-semibold text-amber-800 dark:text-amber-300">
+                Penalty changes apply to all live loans of this product at their next assessment.
+              </p>
+            </div>
+
+            <form onSubmit={handleSaveProduct} className="space-y-4 mt-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor="edit-penalty-rate" className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                    Penalty Rate (%)
+                  </Label>
+                  <Input
+                    id="edit-penalty-rate"
+                    type="number"
+                    min={0}
+                    max={100}
+                    step={0.5}
+                    value={editPenaltyRatePct}
+                    onChange={(e) => setEditPenaltyRatePct(e.target.value)}
+                    placeholder="e.g. 3"
+                    className="h-10 rounded-xl border-zinc-200 dark:border-zinc-700 bg-zinc-50"
+                    required
+                  />
+                  <p className="text-[10px] text-zinc-400">Charged on the outstanding balance.</p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="edit-penalty-interval" className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                    Interval (Days)
+                  </Label>
+                  <Input
+                    id="edit-penalty-interval"
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={editPenaltyInterval}
+                    onChange={(e) => setEditPenaltyInterval(e.target.value)}
+                    placeholder="e.g. 2"
+                    className="h-10 rounded-xl border-zinc-200 dark:border-zinc-700 bg-zinc-50"
+                    required
+                  />
+                  <p className="text-[10px] text-zinc-400">Days between penalty assessments.</p>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-max-penalty" className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                  Max Penalty (KES)
+                </Label>
+                <Input
+                  id="edit-max-penalty"
+                  type="number"
+                  min={0}
+                  step={0.01}
+                  value={editMaxPenalty}
+                  onChange={(e) => setEditMaxPenalty(e.target.value)}
+                  placeholder="Leave empty for no cap"
+                  className="h-10 rounded-xl border-zinc-200 dark:border-zinc-700 bg-zinc-50"
+                />
+                <p className="text-[10px] text-zinc-400">Upper limit per assessment. Empty = no cap.</p>
+              </div>
+
+              <label className="flex items-center gap-2.5 cursor-pointer pt-1">
+                <input
+                  type="checkbox"
+                  checked={editIsActive}
+                  onChange={(e) => setEditIsActive(e.target.checked)}
+                  className="rounded border-zinc-300 text-primary focus:ring-primary size-4 cursor-pointer"
+                />
+                <span className="text-xs font-bold text-zinc-800 dark:text-zinc-200">
+                  Product active (accepts new applications)
+                </span>
+              </label>
+
+              <div className="flex gap-2.5 justify-end pt-1">
+                <Button
+                  type="button"
+                  onClick={() => setEditingProduct(null)}
+                  variant="ghost"
+                  className="h-10 rounded-xl text-xs font-bold"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={updateProductMutation.isPending}
+                  className="h-10 rounded-xl bg-[#0D44A2] hover:bg-[#0A3682] text-white text-xs font-bold shadow flex items-center gap-1.5"
+                >
+                  {updateProductMutation.isPending && <Loader2 className="animate-spin size-3.5" />}
+                  Save Changes
                 </Button>
               </div>
             </form>
