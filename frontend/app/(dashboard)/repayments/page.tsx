@@ -373,6 +373,11 @@ export default function RepaymentsPage() {
     setForm({ ...form, loan_id, client: loan?.client || "" });
   };
 
+  const selectedLoan = disbursedLoans.find(l => l.id === form.loan_id);
+  const nextInstallment = selectedLoan?.installments?.find(i => i.status !== "Paid");
+  const amountValue = parseFloat(form.amount);
+  const isPartialPayment = !!nextInstallment && !Number.isNaN(amountValue) && amountValue > 0 && amountValue < nextInstallment.amount;
+
   const openRep = (r: Repayment) => {
     if (verifyingRep) return;
     setViewingRep(r);
@@ -592,6 +597,13 @@ export default function RepaymentsPage() {
                   </select>
                 </div>
               </div>
+              {isPartialPayment && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/20 p-3 text-[11px] font-semibold text-amber-800 dark:text-amber-300">
+                  Partial payment — {formatKES(amountValue)} is less than the next due installment of{" "}
+                  {formatKES(nextInstallment!.amount)} (due {formatDate(nextInstallment!.due_date)}). The loan
+                  will stay in Arrears until the full installment is paid.
+                </div>
+              )}
               <div className="space-y-1.5">
                 <Label className="text-xs font-semibold">Reference / Transaction Code</Label>
                 <Input value={form.reference} onChange={e => setForm({...form, reference: e.target.value})} placeholder="e.g. M-PESA QER7X9KL2 or Bank EFT ref" className="rounded-xl" />

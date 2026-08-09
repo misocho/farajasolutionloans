@@ -60,7 +60,7 @@
 - [x] C2 Settings change-password wired to `PATCH /auth/change-password` — Security section uses `changePasswordApi` (useMutation): validates fields, min-8 check, shows backend `detail` on 400 ("Current password is incorrect."), clears form on success; no more fake setTimeout save in the password flow
 - [x] C3 Client detail drawer → `GET /clients/{id}` — new `fetchClientApi`; drawer opens instantly from list snapshot then swaps in fresh detail via `useQuery(["client-detail", id])`; error banner with Retry if refresh fails. Backend: list endpoint now slims base64 media (photos/signatures → null; full payload only in `GET /clients/{id}`)
 - [x] C4 Full computed status badges (Almost Due / Due / Arrears / Past Maturity / Defaulter) + per-loan installment timeline — canonical `components/ui/status-badge.tsx` (loans page + client drawer migrated); shared `components/loans/installment-timeline.tsx` (progress bar + per-installment Paid/Upcoming/Late/Missed pills). Client detail drawer lists the client's loans (`fetchClientLoansApi`, `["client-loans", id]`) with computed badge + outstanding; tapping a loan inline-fetches `["loan", id]` and shows its timeline/penalty. Backend: no change — `GET /loans?client_id=` and `LOAN_OUT` already return `installments`
-- [ ] C5 Partial-payment → Arrears verified end-to-end + partial-payment warning in repayments UI
+- [x] C5 Partial-payment → Arrears verified end-to-end + partial-payment warning in repayments UI — staging-verified live (partial 500 on LN-2026-004: installment stays Pending, loan stays Arrears); record form now warns when amount < next unpaid installment (see P2 notes)
 - [x] C6 `PATCH /admin/loan-products/{id}` (penalty rate/interval config) — `GET /admin/loan-products` (all incl. inactive) + `PATCH /admin/loan-products/{id}` in `admin.py` (Director/System Admin gate via `check_is_director`); editable: penalty_rate (0–100%), penalty_interval_days (≥1), max_penalty_amount (≥0, null = no cap), is_active; 404/400 on unknown/missing, schema validation via `LoanProductUpdate`; Admin Console gains a "Loan Products" tab (list + edit modal with live-loan warning). Penalty still computed live from the product at assessment time
 - [ ] C7 Google Maps link input + preview on client form
 - [ ] C8 Branch-scoping verification pass (LO/Manager see own branch only) + close permission-guard gaps (`GET /loan-products`, `/dashboard/stats`, `/notifications`)
@@ -303,12 +303,12 @@ Director sends invite (Name + Email + Role + Branch)
 - [x] Installment matching on repayment (via `loan_service`)
 - [x] Penalty calc on outstanding (3%/2d)
 - [x] `PATCH /admin/loan-products/{id}` — Admin edit of penalty_rate / penalty_interval_days (shipped 2026-08-09, C6)
-- [ ] Partial payment → installment `Late` + loan `Arrears` status logic — verify implemented end-to-end
-- [ ] **Bug: `repayments.create` permission check uses non-existent permission** (see Known Bugs)
+- [x] Partial payment → installment `Late` + loan `Arrears` status logic — ✅ verified end-to-end 2026-08-09 on staging (C5): recorded KES 500 partial on Arrears demo loan LN-2026-004 (ref C5-VERIFY-20260809), Manager-verified → `mark_installments_paid` leaves the 1,500 installment `Pending` (only fully-covered installments flip to Paid), loan reads `Arrears` (outstanding 5,500 > expected 4,000). `Late`/`Missed` are computed at read time (installments serializer + schedule/calendar `is_overdue`), not stored
+- [x] **Bug: `repayments.create` permission check uses non-existent permission** — fixed 2026-08-07 (now `repayments.record`, loans_clients.py:765); line kept ticked for history
 
 ### Frontend
 - [x] Repayments list (All / Pending tabs), record form, verify modal (role-gated)
-- [ ] Partial payment warning when repayment < installment due — ❌ missing
+- [x] Partial payment warning when repayment < installment due — record form warns when the amount is less than the next unpaid installment ("loan will stay in Arrears until the full installment is paid"), shipped 2026-08-09 (C5)
 - [ ] Installment schedule timeline per loan (which weeks paid/missed/upcoming) in loan detail — ❌ missing (calendar page exists but not per-loan timeline)
 
 ---
