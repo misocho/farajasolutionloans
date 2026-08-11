@@ -411,45 +411,6 @@ function DependantList({
   );
 }
 
-// ── Maps link input + preview ──────────────────────────────────────────────────
-
-function MapsLinkPreview({ value }: { value: string }) {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  const normalized = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
-  const isValid = /^(https?:\/\/)?(www\.)?(maps\.google\.|google\.com\/maps|goo\.gl\/maps|maps\.app\.goo\.gl)/i.test(trimmed);
-  if (!isValid) {
-    return (
-      <p className="text-[10px] font-semibold text-rose-500">
-        Enter a valid Google Maps link (google.com/maps, maps.google.com, or maps.app.goo.gl).
-      </p>
-    );
-  }
-  const canEmbed = /^https?:\/\/(maps\.google\.|www\.google\.com\/maps)/i.test(normalized);
-  return (
-    <div className="mt-1.5 space-y-1.5">
-      {canEmbed && (
-        <iframe
-          title="Location preview"
-          src={`https://maps.google.com/maps?q=${encodeURIComponent(normalized)}&output=embed`}
-          className="w-full h-28 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-950"
-          loading="lazy"
-          referrerPolicy="no-referrer-when-downgrade"
-        />
-      )}
-      <a
-        href={normalized}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="inline-flex items-center gap-1 text-[10px] font-bold text-[#0D44A2] underline cursor-pointer"
-      >
-        <MapPin className="size-3" /> Open in Google Maps
-      </a>
-    </div>
-  );
-}
-
-
 // ── Loan Detail Panel (inline expansion in client drawer) ──────────────────────
 
 function LoanInstallmentPanel({ loanId }: { loanId: string }) {
@@ -565,7 +526,6 @@ export default function ClientsPage() {
     periodYears: "",
     accommodation: "Family",
     landmark: "",
-    residentialMapsLink: "",
   });
 
   // ── Step 2: Applicant's dependants ─────────────────────────────────────────
@@ -640,7 +600,6 @@ export default function ClientsPage() {
     landmark: "",
     yearsOfOperation: "",
     location: "",
-    mapsLink: "",
     estimatedAssetValue: "",
   });
 
@@ -775,7 +734,6 @@ export default function ClientsPage() {
       period_years: personalInfo.periodYears,
       accommodation: personalInfo.accommodation,
       landmark: personalInfo.landmark,
-      residential_maps_link: personalInfo.residentialMapsLink || undefined,
 
       spouse_name: spouseInfo.fullName || undefined,
       spouse_id: spouseInfo.idNo || undefined,
@@ -800,7 +758,6 @@ export default function ClientsPage() {
       business_landmark: businessDetails.landmark || undefined,
       business_years: businessDetails.yearsOfOperation || undefined,
       business_location: businessDetails.location || undefined,
-      business_maps_link: businessDetails.mapsLink || undefined,
       estimated_asset_value: businessDetails.estimatedAssetValue
         ? Number(businessDetails.estimatedAssetValue)
         : undefined,
@@ -831,12 +788,12 @@ export default function ClientsPage() {
   const resetForm = () => {
     setSuccess(false);
     setStep(1);
-    setPersonalInfo({ fullName: "", idNo: "", pin: "", phone: "", gender: "Male", maritalStatus: "Single", occupation: "", address: "", periodYears: "", accommodation: "Family", landmark: "", residentialMapsLink: "" });
+    setPersonalInfo({ fullName: "", idNo: "", pin: "", phone: "", gender: "Male", maritalStatus: "Single", occupation: "", address: "", periodYears: "", accommodation: "Family", landmark: "" });
     setApplicantDependants([]);
     setSpouseInfo({ fullName: "", idNo: "", phone: "", occupation: "", address: "" });
     setSpouseDependants([]);
     setNextOfKinList([{ fullName: "", relationship: "", phone: "", address: "", idNo: "", occupation: "" }]);
-    setBusinessDetails({ name: "", type: "Retail & Trade", customSector: "", landmark: "", yearsOfOperation: "", location: "", mapsLink: "", estimatedAssetValue: "" });
+    setBusinessDetails({ name: "", type: "Retail & Trade", customSector: "", landmark: "", yearsOfOperation: "", location: "", estimatedAssetValue: "" });
     setProperties([{ description: "", makeModel: "", serialNo: "", estValue: "" }]);
     setGuarantorDetails({ surname: "", firstName: "", middleName: "", idNo: "", periodKnown: "", relationship: "", phone: "", address: "", occupation: "" });
     setApplicantIdPhoto("");
@@ -1121,11 +1078,6 @@ export default function ClientsPage() {
                       <Label className="text-xs font-semibold">Nearest Landmark <span className="text-rose-500">*</span></Label>
                       <Input value={personalInfo.landmark} onChange={(e) => setPersonalInfo({ ...personalInfo, landmark: e.target.value })} placeholder="e.g. Near Mazeras Junction" required />
                     </div>
-                    <div className="sm:col-span-2 space-y-1">
-                      <Label className="text-xs font-semibold">Residential Location (Google Maps link) <span className="text-zinc-400 font-normal">· optional</span></Label>
-                      <Input value={personalInfo.residentialMapsLink} onChange={(e) => setPersonalInfo({ ...personalInfo, residentialMapsLink: e.target.value })} placeholder="Paste a Google Maps share link" className="bg-white dark:bg-zinc-900" />
-                      <MapsLinkPreview value={personalInfo.residentialMapsLink} />
-                    </div>
                   </div>
                 </div>
               )}
@@ -1304,11 +1256,6 @@ export default function ClientsPage() {
                     <div className="sm:col-span-2 space-y-1">
                       <Label className="text-xs font-semibold">Physical Business Location / Address <span className="text-rose-500">*</span></Label>
                       <Input value={businessDetails.location} onChange={(e) => setBusinessDetails({ ...businessDetails, location: e.target.value })} placeholder="Shop road, building, town" required />
-                    </div>
-                    <div className="sm:col-span-2 space-y-1">
-                      <Label className="text-xs font-semibold">Business Location (Google Maps link) <span className="text-zinc-400 font-normal">· optional</span></Label>
-                      <Input value={businessDetails.mapsLink} onChange={(e) => setBusinessDetails({ ...businessDetails, mapsLink: e.target.value })} placeholder="Paste a Google Maps share link" className="bg-white dark:bg-zinc-900" />
-                      <MapsLinkPreview value={businessDetails.mapsLink} />
                     </div>
                     <div className="sm:col-span-2 space-y-1">
                       <Label className="text-xs font-semibold">Estimated Asset Value (KES)</Label>
