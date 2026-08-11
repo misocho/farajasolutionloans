@@ -62,7 +62,7 @@
 - [x] C4 Full computed status badges (Almost Due / Due / Arrears / Past Maturity / Defaulter) + per-loan installment timeline — canonical `components/ui/status-badge.tsx` (loans page + client drawer migrated); shared `components/loans/installment-timeline.tsx` (progress bar + per-installment Paid/Upcoming/Late/Missed pills). Client detail drawer lists the client's loans (`fetchClientLoansApi`, `["client-loans", id]`) with computed badge + outstanding; tapping a loan inline-fetches `["loan", id]` and shows its timeline/penalty. Backend: no change — `GET /loans?client_id=` and `LOAN_OUT` already return `installments`
 - [x] C5 Partial-payment → Arrears verified end-to-end + partial-payment warning in repayments UI — staging-verified live (partial 500 on LN-2026-004: installment stays Pending, loan stays Arrears); record form now warns when amount < next unpaid installment (see P2 notes)
 - [x] C6 `PATCH /admin/loan-products/{id}` (penalty rate/interval config) — `GET /admin/loan-products` (all incl. inactive) + `PATCH /admin/loan-products/{id}` in `admin.py` (Director/System Admin gate via `check_is_director`); editable: penalty_rate (0–100%), penalty_interval_days (≥1), max_penalty_amount (≥0, null = no cap), is_active; 404/400 on unknown/missing, schema validation via `LoanProductUpdate`; Admin Console gains a "Loan Products" tab (list + edit modal with live-loan warning). Penalty still computed live from the product at assessment time
-- [ ] C7 Google Maps link input + preview on client form
+- [x] C7 Google Maps link input + preview on client form — optional `residential_maps_link` + `business_maps_link` inputs (Google Maps share link) with live embed preview + validation on the client registration form; client detail drawer shows clickable "Open in Google Maps" rows for both links
 - [ ] C8 Branch-scoping verification pass (LO/Manager see own branch only) + close permission-guard gaps (`GET /loan-products`, `/dashboard/stats`, `/notifications`)
 
 ### Phase D — Reports & email notifications (P4–P5) · ~2 weeks
@@ -291,7 +291,7 @@ Director sends invite (Name + Email + Role + Branch)
 - [ ] **Client detail drawer uses list-row data** — add `fetchClientApi(id)` in `features/clients/api.ts` + wire `GET /clients/{id}`
 - [ ] **Loan creation form** — client free-text input + hardcoded sectors; should use `GET /loan-products` (product dropdown) + client search — ✅ **DONE 2026-08-07** (loans page modal: client select, product select, fee quote/pay/verify, submit blocked until verified fee)
 - [ ] **Status badges** — only Pending/Approved/Disbursed/Rejected/Closed + overdue flag; add Almost Due / Due / Arrears / Past Maturity / Defaulter
-- [ ] Location fields — Google Maps link input + preview (currently plain text)
+- [ ] Location fields — Google Maps link input + preview (currently plain text) — ✅ **DONE 2026-08-11** (C7: optional maps-link inputs with live preview + drawer links)
 
 ---
 

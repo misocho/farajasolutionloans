@@ -121,6 +121,8 @@ export interface Client {
   period_years?: string;
   accommodation?: string;
   landmark?: string;
+  residential_maps_link?: string;
+  business_maps_link?: string;
   spouse_name?: string;
   spouse_id?: string;
   spouse_phone?: string;
