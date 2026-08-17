@@ -61,6 +61,7 @@ function getEventColor(ev: InstallmentEvent): string {
   if (ev.status.toLowerCase() === "paid") return STATUS_DOT.paid;
   if (ev.is_today) return STATUS_DOT.today;
   if (ev.is_overdue) return STATUS_DOT.overdue;
+  if ((ev.paid_amount ?? 0) > 0) return "bg-amber-500";
   return STATUS_DOT.pending;
 }
 
@@ -68,6 +69,7 @@ function getEventBg(ev: InstallmentEvent): string {
   if (ev.status.toLowerCase() === "paid") return "bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300";
   if (ev.is_today) return "bg-orange-50 dark:bg-orange-950/20 border-orange-200 dark:border-orange-800 text-orange-700 dark:text-orange-300";
   if (ev.is_overdue) return "bg-rose-50 dark:bg-rose-950/20 border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300";
+  if ((ev.paid_amount ?? 0) > 0) return "bg-amber-50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300";
   return "bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800 text-[#0D44A2] dark:text-blue-300";
 }
 
@@ -86,7 +88,8 @@ function DayCell({
   const iso = toISO(year, month, day);
   const overdueCount = events.filter(e => e.is_overdue).length;
   const paidCount = events.filter(e => e.status.toLowerCase() === "paid").length;
-  const pendingCount = events.filter(e => !e.is_overdue && e.status.toLowerCase() !== "paid").length;
+  const partialCount = events.filter(e => e.status.toLowerCase() !== "paid" && (e.paid_amount ?? 0) > 0).length;
+  const pendingCount = events.filter(e => !e.is_overdue && e.status.toLowerCase() !== "paid" && !((e.paid_amount ?? 0) > 0)).length;
   const hasEvents = events.length > 0;
 
   return (
@@ -115,6 +118,12 @@ function DayCell({
             <div className="flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0" />
               <span className="text-[9px] font-bold text-rose-600 truncate">{overdueCount} overdue</span>
+            </div>
+          )}
+          {partialCount > 0 && (
+            <div className="flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+              <span className="text-[9px] font-bold text-amber-600 truncate">{partialCount} partial</span>
             </div>
           )}
           {pendingCount > 0 && (
@@ -295,7 +304,10 @@ function DayPanel({ dateIso, events }: { dateIso: string; events: InstallmentEve
       </div>
 
       <div className="space-y-2">
-        {events.map(ev => (
+        {events.map(ev => {
+          const isPartial = ev.status.toLowerCase() !== "paid" && (ev.paid_amount ?? 0) > 0;
+          const remaining = Math.max(ev.amount - (ev.paid_amount ?? 0), 0);
+          return (
           <div key={ev.id} className={`border rounded-xl p-3 text-xs ${getEventBg(ev)}`}>
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2 min-w-0">
@@ -311,17 +323,24 @@ function DayPanel({ dateIso, events }: { dateIso: string; events: InstallmentEve
                   ev.status.toLowerCase() === "paid" ? "bg-emerald-100 text-emerald-700" :
                   ev.is_overdue ? "bg-rose-100 text-rose-700" :
                   ev.is_today ? "bg-orange-100 text-orange-700" :
+                  isPartial ? "bg-amber-100 text-amber-700" :
                   "bg-blue-100 text-blue-700"
                 }`}>
-                  {ev.status.toLowerCase() === "paid" ? "Paid" : ev.is_overdue ? `${ev.days_overdue}d overdue` : ev.is_today ? "Due Today" : "Pending"}
+                  {ev.status.toLowerCase() === "paid" ? "Paid" : ev.is_overdue ? `${ev.days_overdue}d overdue` : ev.is_today ? "Due Today" : isPartial ? "Partial" : "Pending"}
                 </span>
               </div>
             </div>
-            {ev.client_phone && (
+            {isPartial && (
+              <p className="text-[10px] font-semibold text-amber-700 mt-1.5 pl-4">
+                {formatKES(ev.paid_amount ?? 0)} paid · {formatKES(remaining)} remaining
+              </p>
+            )}
+            {!isPartial && ev.client_phone && (
               <p className="text-[10px] opacity-60 mt-1.5 pl-4">{ev.client_phone}</p>
             )}
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -494,7 +513,7 @@ export default function SchedulePage() {
             {overdueAll.length}
           </p>
           <p className="text-[10px] text-zinc-400">
-            {formatKES(overdueAll.reduce((s, e) => s + e.amount, 0))}
+            {formatKES(overdueAll.reduce((s, e) => s + Math.max(e.amount - (e.paid_amount ?? 0), 0), 0))}
           </p>
         </div>
         <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-3.5 rounded-[20px] sm:rounded-[24px] shadow-sm">
@@ -605,6 +624,7 @@ export default function SchedulePage() {
                 {[
                   { color: "bg-rose-500", label: "Overdue" },
                   { color: "bg-[#F57424]", label: "Due Today" },
+                  { color: "bg-amber-500", label: "Partial" },
                   { color: "bg-[#0D44A2]", label: "Upcoming" },
                   { color: "bg-emerald-500", label: "Paid" },
                 ].map(l => (
@@ -652,7 +672,7 @@ export default function SchedulePage() {
                           <p className="text-[9px] text-rose-600/70">{ev.due_date} · {ev.days_overdue}d overdue</p>
                         </div>
                         <span className="text-[10px] font-black text-rose-700 shrink-0">
-                          {formatKES(ev.amount)}
+                          {formatKES(Math.max(ev.amount - (ev.paid_amount ?? 0), 0))}
                         </span>
                       </button>
                     ))}

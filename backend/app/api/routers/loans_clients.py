@@ -646,9 +646,14 @@ def get_installments_calendar(
     )
 
     events = []
+    paid_cache: dict[UUID, dict[UUID, Decimal]] = {}
     for i in rows:
         due = as_nairobi_date(i.due_date)
         is_overdue = due is not None and due < today and i.status.value.lower() != "paid"
+        loan_id = i.loan_id
+        if loan_id not in paid_cache:
+            paid_cache[loan_id] = loan_service.installment_paid_amounts(db, i.loan)
+        paid = paid_cache[loan_id].get(i.id, Decimal("0"))
         events.append(
             {
                 "id": str(i.id),
@@ -658,6 +663,7 @@ def get_installments_calendar(
                 "client_phone": i.loan.client.phone if (i.loan and i.loan.client) else "",
                 "due_date": due.isoformat() if due else "",
                 "amount": float(i.amount),
+                "paid_amount": float(paid),
                 "status": i.status.value,
                 "is_overdue": is_overdue,
                 "is_today": due == today,

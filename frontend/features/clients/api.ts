@@ -604,6 +604,7 @@ export interface InstallmentEvent {
   client_phone: string;
   due_date: string;
   amount: number;
+  paid_amount: number;
   status: string;
   is_overdue: boolean;
   is_today: boolean;
