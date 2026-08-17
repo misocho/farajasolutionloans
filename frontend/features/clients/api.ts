@@ -573,6 +573,11 @@ export async function fetchBranchesApi(): Promise<Branch[]> {
   return res.data;
 }
 
+export async function fetchClientPdfApi(clientId: string): Promise<Blob> {
+  const res = await api.get<Blob>(`/clients/${clientId}/pdf`, { responseType: "blob" });
+  return res.data;
+}
+
 export async function createBranchApi(data: Partial<BranchCreateData>): Promise<Branch> {
   const res = await api.post<Branch>("/branches", data);
   return res.data;

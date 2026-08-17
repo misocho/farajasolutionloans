@@ -33,6 +33,7 @@ import {
   RefreshCw,
   Banknote,
   ChevronDown,
+  Download,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -42,6 +43,7 @@ import {
   fetchClientsApi,
   fetchClientApi,
   fetchClientLoansApi,
+  fetchClientPdfApi,
   fetchLoanApi,
   createClientApi,
   type Client,
@@ -512,6 +514,20 @@ export default function ClientsPage() {
     queryFn: () => fetchClientLoansApi(detailClientId!),
     enabled: !!detailClientId,
   });
+
+  const downloadClientPdf = async (clientId: string) => {
+    try {
+      const blob = await fetchClientPdfApi(clientId);
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `client-${clientId.slice(0, 8)}.pdf`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+    } catch {
+      toast.error("Could not download the PDF");
+    }
+  };
 
   // ── Step 1: Personal & Residential ─────────────────────────────────────────
   const [personalInfo, setPersonalInfo] = useState({
@@ -1481,9 +1497,18 @@ export default function ClientsPage() {
                   <p className="text-xs font-bold text-zinc-400">{detailClient ? `Registered ${formatDate(detailClient.date_registered)}` : "Fetching details…"}</p>
                 </div>
               </div>
-              <button onClick={() => { setSelectedClient(null); setDetailClientId(null); }} className="p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full cursor-pointer">
-                <X className="size-5 text-zinc-500" />
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => downloadClientPdf(detailClient?.id ?? selectedClient?.id ?? "")}
+                  disabled={!detailClient && !selectedClient}
+                  className="flex items-center gap-1.5 h-9 px-3 bg-[#F57424] hover:bg-[#e0641a] text-white rounded-xl text-[11px] font-bold cursor-pointer disabled:opacity-40"
+                >
+                  <Download className="size-3.5" /> PDF
+                </button>
+                <button onClick={() => { setSelectedClient(null); setDetailClientId(null); }} className="p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full cursor-pointer">
+                  <X className="size-5 text-zinc-500" />
+                </button>
+              </div>
             </div>
 
             <div className="p-5 space-y-6 text-xs text-zinc-700 dark:text-zinc-300">

@@ -22,6 +22,7 @@ from uuid import UUID
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
@@ -41,7 +42,7 @@ from app.models.loan_product import LoanProduct
 from app.models.repayment import Repayment
 from app.models.user import User
 from app.schemas.loan_products import LoanQuoteResponse
-from app.services import audit_service, fee_service, loan_service
+from app.services import audit_service, fee_service, loan_service, pdf_service
 
 router = APIRouter()
 
@@ -334,6 +335,29 @@ def get_client(
         raise HTTPException(status_code=404, detail="Client not found")
     _assert_branch_visible(db, current_user, client.branch_id)
     return _serialize_client(client)
+
+
+@router.get("/clients/{client_id}/pdf")
+def download_client_pdf(
+    client_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Response:
+    _require_permission(db, current_user, "clients.view")
+    client = db.scalar(
+        select(Client)
+        .options(joinedload(Client.loans))
+        .where(Client.id == client_id)
+    )
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    _assert_branch_visible(db, current_user, client.branch_id)
+    pdf = pdf_service.build_client_pdf(client, list(client.loans))
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="client-{client.client_number}.pdf"'},
+    )
 
 
 @router.post("/clients", status_code=status.HTTP_201_CREATED)
