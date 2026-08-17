@@ -42,7 +42,7 @@ from app.models.loan_product import LoanProduct
 from app.models.repayment import Repayment
 from app.models.user import User
 from app.schemas.loan_products import LoanQuoteResponse
-from app.services import audit_service, fee_service, loan_service, pdf_service
+from app.services import audit_service, email_service, fee_service, loan_service, pdf_service
 
 router = APIRouter()
 
@@ -737,6 +737,13 @@ def approve_loan(
         loan.id, branch_id=loan.branch_id, meta={"note": request.note} if request.note else None,
     )
     db.commit()
+    if loan.submitted_by and loan.submitted_by.email:
+        try:
+            email_service.send_loan_approved_email(
+                loan.submitted_by.email, loan.loan_number, loan.client.name
+            )
+        except Exception:
+            pass
     return _enrich_loan(loan, db)
 
 
@@ -783,6 +790,13 @@ def disburse_loan(
         loan.id, branch_id=loan.branch_id,
     )
     db.commit()
+    if loan.submitted_by and loan.submitted_by.email:
+        try:
+            email_service.send_loan_disbursed_email(
+                loan.submitted_by.email, loan.loan_number, loan.client.name
+            )
+        except Exception:
+            pass
     return _enrich_loan(loan, db)
 
 

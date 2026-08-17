@@ -9,6 +9,7 @@ from app.models.loan import Loan
 from app.models.loan_product import LoanProduct
 from app.models.notification_pref import NotificationPref
 from app.models.notification_read import NotificationRead
+from app.models.penalty_snapshot import PenaltySnapshot
 from app.models.permission import Permission
 from app.models.repayment import Repayment
 from app.models.role import Role
@@ -30,6 +31,7 @@ __all__ = [
     "Loan",
     "LoanProduct",
     "NotificationRead",
+    "PenaltySnapshot",
     "Permission",
     "Repayment",
     "Role",
