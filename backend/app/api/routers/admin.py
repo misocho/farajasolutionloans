@@ -1,36 +1,38 @@
+import secrets
 from uuid import UUID
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
-from app.db.session import get_db
 from app.api.dependencies.auth import get_current_user
-from app.models.user import User
-from app.models.role import Role
-from app.models.permission import Permission
-from app.models.user_role import UserRole
-from app.models.role_permission import RolePermission
-from app.models.user_branch import UserBranch
-from app.models.user_invite import UserInvite, InviteStatus
+from app.core.permissions import get_user_permissions
+from app.db.session import get_db
 from app.models.enums import UserStatus
 from app.models.loan_product import LoanProduct
+from app.models.permission import Permission
+from app.models.role import Role
+from app.models.role_permission import RolePermission
+from app.models.user import User
+from app.models.user_branch import UserBranch
+from app.models.user_invite import InviteStatus, UserInvite
+from app.models.user_role import UserRole
+from app.schemas.loan_products import LoanProductCreate, LoanProductResponse, LoanProductUpdate
 from app.schemas.users import (
-    UserAdminResponse,
-    UserAdminDetailResponse,
-    RoleResponse,
-    PermissionResponse,
-    UpdateUserRolesRequest,
-    UpdateRolePermissionsRequest,
     InviteUserRequest,
-    UserInviteResponse,
+    PermissionResponse,
+    RoleResponse,
+    UpdateRolePermissionsRequest,
+    UpdateUserRolesRequest,
     UpdateUserStatusRequest,
+    UserAdminDetailResponse,
+    UserAdminResponse,
+    UserInviteResponse,
 )
-from app.schemas.loan_products import LoanProductResponse, LoanProductUpdate
-from app.core.permissions import get_user_permissions
 from app.services import invite_service
 from app.services.email_service import send_account_approved_email, send_password_reset_email
 from app.services.invite_service import InviteError
-import secrets
 
 router = APIRouter(
     prefix="/admin",
@@ -189,8 +191,9 @@ def reset_user_password(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     # Generate a reset token (reuse invite token mechanism)
-    from app.models.user_invite import UserInvite, InviteStatus
-    from datetime import datetime, timezone, timedelta
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.user_invite import InviteStatus, UserInvite
     reset_token = secrets.token_urlsafe(48)
     from app.core.config import settings
     reset_link = f"{settings.FRONTEND_URL}/accept-invite?token={reset_token}&mode=reset"
@@ -307,6 +310,30 @@ def get_admin_loan_products(
 ):
     products = db.scalars(select(LoanProduct).order_by(LoanProduct.name)).all()
     return products
+
+
+@router.post(
+    "/loan-products",
+    response_model=LoanProductResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_loan_product(
+    payload: LoanProductCreate,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(check_is_director),
+):
+    product = LoanProduct(**payload.model_dump())
+    db.add(product)
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"A loan product named '{payload.name}' already exists",
+        ) from exc
+    db.refresh(product)
+    return product
 
 
 @router.patch("/loan-products/{product_id}", response_model=LoanProductResponse)

@@ -19,6 +19,7 @@ import {
   Hourglass,
   RefreshCw,
   Package,
+  Plus,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -36,6 +37,7 @@ import {
   cancelInviteApi,
   approveUserApi,
   fetchAdminLoanProductsApi,
+  createLoanProductApi,
   updateLoanProductApi,
   type AdminUser,
   type AdminUserDetail,
@@ -44,6 +46,7 @@ import {
   type InviteUserPayload,
   type LoanProduct,
   type LoanProductUpdatePayload,
+  type LoanProductCreatePayload,
 } from "@/features/admin/api";
 import { fetchBranchesApi } from "@/features/clients/api";
 import { formatDate, formatKES } from "@/app/lib/format";
@@ -75,6 +78,15 @@ export default function UsersAdminPage() {
   const [editPenaltyInterval, setEditPenaltyInterval] = useState("2");
   const [editMaxPenalty, setEditMaxPenalty] = useState("");
   const [editIsActive, setEditIsActive] = useState(true);
+  const [showCreateProduct, setShowCreateProduct] = useState(false);
+  const [createName, setCreateName] = useState("");
+  const [createType, setCreateType] = useState("Custom");
+  const [createDuration, setCreateDuration] = useState("28");
+  const [createInterestPct, setCreateInterestPct] = useState("20");
+  const [createPenaltyRatePct, setCreatePenaltyRatePct] = useState("3");
+  const [createPenaltyInterval, setCreatePenaltyInterval] = useState("2");
+  const [createMaxPenalty, setCreateMaxPenalty] = useState("");
+  const [createIsActive, setCreateIsActive] = useState(true);
 
   // State for Invite Modal
   const [showInviteModal, setShowInviteModal] = useState(false);
@@ -262,6 +274,73 @@ export default function UsersAdminPage() {
       });
     },
   });
+
+  const createProductMutation = useMutation({
+    mutationFn: (payload: LoanProductCreatePayload) => createLoanProductApi(payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin-products"] });
+      queryClient.invalidateQueries({ queryKey: ["loan-products"] });
+      toast.success("Loan product created");
+      setShowCreateProduct(false);
+      setCreateName("");
+      setCreateType("Custom");
+      setCreateDuration("28");
+      setCreateInterestPct("20");
+      setCreatePenaltyRatePct("3");
+      setCreatePenaltyInterval("2");
+      setCreateMaxPenalty("");
+      setCreateIsActive(true);
+    },
+    onError: (error: unknown) => {
+      const detail = (error as { response?: { data?: { detail?: unknown } } }).response?.data?.detail;
+      toast.error("Failed to create loan product", {
+        description: typeof detail === "string" ? detail : "Check the values and try again.",
+      });
+    },
+  });
+
+  const handleCreateProduct = (e: React.FormEvent) => {
+    e.preventDefault();
+    const interest = Number(createInterestPct);
+    const rate = Number(createPenaltyRatePct);
+    const interval = Number(createPenaltyInterval);
+    const duration = Number(createDuration);
+    const maxPenalty = createMaxPenalty.trim() === "" ? null : Number(createMaxPenalty);
+    if (!createName.trim()) {
+      toast.error("Product name is required");
+      return;
+    }
+    if (!Number.isInteger(duration) || duration < 1) {
+      toast.error("Duration must be a whole number of at least 1 day");
+      return;
+    }
+    if (Number.isNaN(interest) || interest <= 0 || interest > 100) {
+      toast.error("Interest rate must be between 0% and 100%");
+      return;
+    }
+    if (Number.isNaN(rate) || rate < 0 || rate > 100) {
+      toast.error("Penalty rate must be between 0% and 100%");
+      return;
+    }
+    if (!Number.isInteger(interval) || interval < 1) {
+      toast.error("Penalty interval must be a whole number of at least 1 day");
+      return;
+    }
+    if (maxPenalty != null && (Number.isNaN(maxPenalty) || maxPenalty < 0)) {
+      toast.error("Max penalty must be zero or more");
+      return;
+    }
+    createProductMutation.mutate({
+      name: createName.trim(),
+      product_type: createType,
+      duration_days: duration,
+      interest_rate: interest / 100,
+      penalty_rate: rate / 100,
+      penalty_interval_days: interval,
+      max_penalty_amount: maxPenalty,
+      is_active: createIsActive,
+    });
+  };
 
   const handleOpenEditProduct = (product: LoanProduct) => {
     setEditingProduct(product);
@@ -830,9 +909,18 @@ export default function UsersAdminPage() {
                 Penalty rules and product availability. Changes apply to live loans at their next assessment.
               </p>
             </div>
-            <span className="text-xs bg-zinc-100 dark:bg-zinc-800 text-zinc-500 px-3 py-1 rounded-full font-semibold self-start sm:self-auto">
-              {products?.length || 0} products
-            </span>
+            <div className="flex items-center gap-2 self-start sm:self-auto">
+              <span className="text-xs bg-zinc-100 dark:bg-zinc-800 text-zinc-500 px-3 py-1 rounded-full font-semibold">
+                {products?.length || 0} products
+              </span>
+              <Button
+                onClick={() => setShowCreateProduct(true)}
+                size="sm"
+                className="h-9 rounded-xl bg-[#0D44A2] hover:bg-[#0A3682] text-white text-xs font-bold shadow flex items-center gap-1.5"
+              >
+                <Plus className="size-3.5" /> New Product
+              </Button>
+            </div>
           </div>
 
           {productsLoading ? (
@@ -1208,6 +1296,184 @@ export default function UsersAdminPage() {
                 >
                   {updateProductMutation.isPending && <Loader2 className="animate-spin size-3.5" />}
                   Save Changes
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Create Loan Product */}
+      {showCreateProduct && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/40 backdrop-blur-xs animate-fade-in">
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-[28px] p-6 w-full max-w-md shadow-2xl animate-in fade-in-50 zoom-in-95 duration-200 text-left max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center border-b border-zinc-100 dark:border-zinc-800 pb-3">
+              <div>
+                <h3 className="font-bold text-zinc-900 dark:text-zinc-50 text-base">New Loan Product</h3>
+                <p className="text-xs text-zinc-400 mt-0.5">
+                  Define a new product for loan applications.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowCreateProduct(false)}
+                className="p-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full cursor-pointer focus:outline-none"
+              >
+                <X className="size-5 text-zinc-500" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateProduct} className="space-y-4 mt-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="create-product-name" className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                  Product Name
+                </Label>
+                <Input
+                  id="create-product-name"
+                  type="text"
+                  value={createName}
+                  onChange={(e) => setCreateName(e.target.value)}
+                  placeholder="e.g. Faraja 6 Weeks"
+                  className="h-10 rounded-xl border-zinc-200 dark:border-zinc-700 bg-zinc-50"
+                  required
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="create-product-type" className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                  Product Type
+                </Label>
+                <select
+                  id="create-product-type"
+                  value={createType}
+                  onChange={(e) => setCreateType(e.target.value)}
+                  className="h-10 w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 px-3 text-sm text-zinc-800 dark:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-primary/20"
+                >
+                  <option value="Faraja4Weeks">Faraja 4 Weeks</option>
+                  <option value="Faraja5Weeks">Faraja 5 Weeks</option>
+                  <option value="Lumpsum">Lumpsum</option>
+                  <option value="Custom">Custom</option>
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor="create-duration" className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                    Duration (Days)
+                  </Label>
+                  <Input
+                    id="create-duration"
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={createDuration}
+                    onChange={(e) => setCreateDuration(e.target.value)}
+                    className="h-10 rounded-xl border-zinc-200 dark:border-zinc-700 bg-zinc-50"
+                    required
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="create-interest" className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                    Interest Rate (%)
+                  </Label>
+                  <Input
+                    id="create-interest"
+                    type="number"
+                    min={0}
+                    max={100}
+                    step={0.5}
+                    value={createInterestPct}
+                    onChange={(e) => setCreateInterestPct(e.target.value)}
+                    placeholder="e.g. 20"
+                    className="h-10 rounded-xl border-zinc-200 dark:border-zinc-700 bg-zinc-50"
+                    required
+                  />
+                  <p className="text-[10px] text-zinc-400">Flat rate on the loan amount.</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor="create-penalty-rate" className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                    Penalty Rate (%)
+                  </Label>
+                  <Input
+                    id="create-penalty-rate"
+                    type="number"
+                    min={0}
+                    max={100}
+                    step={0.5}
+                    value={createPenaltyRatePct}
+                    onChange={(e) => setCreatePenaltyRatePct(e.target.value)}
+                    placeholder="e.g. 3"
+                    className="h-10 rounded-xl border-zinc-200 dark:border-zinc-700 bg-zinc-50"
+                    required
+                  />
+                  <p className="text-[10px] text-zinc-400">Charged on the outstanding balance.</p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="create-penalty-interval" className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                    Interval (Days)
+                  </Label>
+                  <Input
+                    id="create-penalty-interval"
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={createPenaltyInterval}
+                    onChange={(e) => setCreatePenaltyInterval(e.target.value)}
+                    placeholder="e.g. 2"
+                    className="h-10 rounded-xl border-zinc-200 dark:border-zinc-700 bg-zinc-50"
+                    required
+                  />
+                  <p className="text-[10px] text-zinc-400">Days between penalty assessments.</p>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="create-max-penalty" className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                  Max Penalty (KES)
+                </Label>
+                <Input
+                  id="create-max-penalty"
+                  type="number"
+                  min={0}
+                  step={0.01}
+                  value={createMaxPenalty}
+                  onChange={(e) => setCreateMaxPenalty(e.target.value)}
+                  placeholder="Leave empty for no cap"
+                  className="h-10 rounded-xl border-zinc-200 dark:border-zinc-700 bg-zinc-50"
+                />
+                <p className="text-[10px] text-zinc-400">Upper limit per assessment. Empty = no cap.</p>
+              </div>
+
+              <label className="flex items-center gap-2.5 cursor-pointer pt-1">
+                <input
+                  type="checkbox"
+                  checked={createIsActive}
+                  onChange={(e) => setCreateIsActive(e.target.checked)}
+                  className="rounded border-zinc-300 text-primary focus:ring-primary size-4 cursor-pointer"
+                />
+                <span className="text-xs font-bold text-zinc-800 dark:text-zinc-200">
+                  Active immediately (accepts new applications)
+                </span>
+              </label>
+
+              <div className="flex gap-2.5 justify-end pt-1">
+                <Button
+                  type="button"
+                  onClick={() => setShowCreateProduct(false)}
+                  variant="ghost"
+                  className="h-10 rounded-xl text-xs font-bold"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={createProductMutation.isPending}
+                  className="h-10 rounded-xl bg-[#0D44A2] hover:bg-[#0A3682] text-white text-xs font-bold shadow flex items-center gap-1.5"
+                >
+                  {createProductMutation.isPending && <Loader2 className="animate-spin size-3.5" />}
+                  Create Product
                 </Button>
               </div>
             </form>

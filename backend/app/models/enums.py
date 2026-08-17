@@ -40,3 +40,4 @@ class LoanProductType(StrEnum):
     FARAJA_4_WEEKS = "Faraja4Weeks"
     FARAJA_5_WEEKS = "Faraja5Weeks"
     LUMPSUM = "Lumpsum"
+    CUSTOM = "Custom"

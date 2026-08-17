@@ -163,8 +163,24 @@ export interface LoanProductUpdatePayload {
   is_active?: boolean;
 }
 
+export interface LoanProductCreatePayload {
+  name: string;
+  product_type: string;
+  duration_days: number;
+  interest_rate: number;
+  penalty_rate: number;
+  penalty_interval_days: number;
+  max_penalty_amount?: number | null;
+  is_active?: boolean;
+}
+
 export async function fetchAdminLoanProductsApi(): Promise<LoanProduct[]> {
   const response = await api.get<LoanProduct[]>("/admin/loan-products");
+  return response.data;
+}
+
+export async function createLoanProductApi(data: LoanProductCreatePayload): Promise<LoanProduct> {
+  const response = await api.post<LoanProduct>("/admin/loan-products", data);
   return response.data;
 }
 
