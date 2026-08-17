@@ -86,11 +86,13 @@ export default function DashboardPage() {
   const { data: loans = [], isLoading: loansLoading } = useQuery({
     queryKey: ["loans", selectedBranchId],
     queryFn: () => fetchLoansApi(selectedBranchId),
+    staleTime: 60_000,
   });
 
   const { data: stats, isLoading: statsLoading } = useQuery({
     queryKey: ["dashboard-stats", selectedBranchId],
     queryFn: () => fetchDashboardStatsApi(selectedBranchId),
+    staleTime: 60_000,
   });
 
   const getGreeting = () => {

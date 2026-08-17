@@ -489,6 +489,7 @@ export default function ClientsPage() {
   const { data: clients = [], isLoading: clientsLoading } = useQuery({
     queryKey: ["clients", selectedBranchId],
     queryFn: () => fetchClientsApi(selectedBranchId),
+    staleTime: 60_000,
   });
 
   // ── Deep-link: /clients?client=<id> opens the detail drawer ────────────────

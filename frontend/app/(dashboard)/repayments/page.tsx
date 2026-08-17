@@ -12,7 +12,7 @@ import { AxiosError } from "axios";
 import { fetchMeApi } from "@/features/auth/api";
 import { useBranch } from "@/components/layout/branch-selector";
 import {
-  fetchRepaymentsApi, createRepaymentApi, verifyRepaymentApi, fetchLoansApi,
+  fetchRepaymentsApi, fetchRepaymentApi, createRepaymentApi, verifyRepaymentApi, fetchLoansApi,
   type Repayment,
 } from "@/features/clients/api";
 import { Input } from "@/components/ui/input";
@@ -150,6 +150,13 @@ function RepaymentDrawer({
 }) {
   const canVerify = permissions.includes("repayments.verify");
 
+  const { data: detail } = useQuery({
+    queryKey: ["repayment", rep.id],
+    queryFn: () => fetchRepaymentApi(rep.id),
+    staleTime: 60_000,
+  });
+  const receiptPhoto = detail?.receipt_photo ?? null;
+
   const rows: [string, string][] = [
     ["Loan", rep.loan_number || rep.loan_id],
     ["Client", rep.client],
@@ -211,12 +218,12 @@ function RepaymentDrawer({
           </div>
 
           {/* Receipt photo */}
-          {rep.receipt_photo && (
+          {receiptPhoto && (
             <div>
               <p className="text-[10px] font-black text-zinc-500 uppercase tracking-wider mb-2">Payment Screenshot</p>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src={rep.receipt_photo}
+                src={receiptPhoto}
                 alt="Payment screenshot"
                 className="w-full rounded-2xl border border-zinc-200 dark:border-zinc-800 object-contain bg-zinc-50 dark:bg-zinc-800/50 max-h-80"
               />
@@ -303,11 +310,13 @@ export default function RepaymentsPage() {
   const { data: repayments = [], isLoading } = useQuery({
     queryKey: ["repayments", selectedBranchId],
     queryFn: () => fetchRepaymentsApi({ branch_id: selectedBranchId }),
+    staleTime: 60_000,
   });
 
   const { data: loans = [] } = useQuery({
     queryKey: ["loans", selectedBranchId],
     queryFn: () => fetchLoansApi(selectedBranchId),
+    staleTime: 60_000,
   });
 
   // Active loans = DB status Disbursed (computed status may be Defaulter/Arrears/etc.)

@@ -325,6 +325,11 @@ export async function fetchRepaymentsApi(options?: {
   return res.data;
 }
 
+export async function fetchRepaymentApi(id: string): Promise<Repayment> {
+  const res = await api.get<Repayment>(`/repayments/${id}`);
+  return res.data;
+}
+
 export async function createRepaymentApi(data: {
   loan_id: string; client: string; amount: number;
   mode: string; reference?: string; receipt_photo?: string | null; recorded_by?: string;

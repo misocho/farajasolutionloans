@@ -16,10 +16,11 @@ PATCH /notifications/read-all — mark all read (clears badge count)
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.dependencies.auth import get_current_user
@@ -32,7 +33,6 @@ from app.models.notification_pref import DEFAULT_PREFS, NotificationPref
 from app.models.notification_read import NotificationRead
 from app.models.repayment import Repayment
 from app.models.user import User
-from app.services.loan_service import get_outstanding
 from app.schemas.notifications import (
     NotificationPrefs,
     NotificationPrefsResponse,
@@ -74,6 +74,23 @@ def _build_notifications(db: Session, current_user: User) -> list[dict]:
     branch_ids = get_user_branch_ids(db, current_user)
     scoped = [] if branch_ids is None else [Loan.branch_id.in_(branch_ids)]
 
+    # One grouped query for verified totals across all disbursed loans in scope —
+    # replaces one SUM query per loan in the sections below.
+    repaid_map = dict(
+        db.execute(
+            select(Repayment.loan_id, func.coalesce(func.sum(Repayment.amount), 0))
+            .join(Loan, Repayment.loan_id == Loan.id)
+            .where(
+                Loan.status == LoanStatus.DISBURSED,
+                Repayment.verified.is_(True),
+                *scoped,
+            )
+            .group_by(Repayment.loan_id)
+        ).all()
+    )
+    def outstanding_of(loan: Loan) -> Decimal:
+        return repaid_map.get(loan.id, Decimal("0"))
+
     # 1. Loans due today
     if prefs.get("due_today", True):
         due_today = (
@@ -92,7 +109,7 @@ def _build_notifications(db: Session, current_user: User) -> list[dict]:
         )
 
         for loan in due_today:
-            outstanding = get_outstanding(db, loan)
+            outstanding = outstanding_of(loan)
             if outstanding <= 0:
                 continue  # Fully repaid but not yet closed — not actually due
             notifications.append(
@@ -128,7 +145,7 @@ def _build_notifications(db: Session, current_user: User) -> list[dict]:
         )
 
         for loan in due_tomorrow:
-            if get_outstanding(db, loan) <= 0:
+            if outstanding_of(loan) <= 0:
                 continue
             notifications.append(
                 {
@@ -160,7 +177,7 @@ def _build_notifications(db: Session, current_user: User) -> list[dict]:
         )
 
         for loan in almost_due:
-            if get_outstanding(db, loan) <= 0:
+            if outstanding_of(loan) <= 0:
                 continue
             due_display = as_nairobi_date(loan.due_date)
             notifications.append(
@@ -195,7 +212,7 @@ def _build_notifications(db: Session, current_user: User) -> list[dict]:
         )
 
         for loan in overdue:
-            if get_outstanding(db, loan) <= 0:
+            if outstanding_of(loan) <= 0:
                 continue  # Fully repaid but not yet closed — not in arrears
             due = as_nairobi_date(loan.due_date)
             days = (today - due).days if due else 0

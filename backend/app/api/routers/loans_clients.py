@@ -118,8 +118,9 @@ def _resolve_branch_assignment(
 # ── CLIENTS ────────────────────────────────────────────────────────────────────
 
 
-def _enrich_loan(loan: Loan, db: Session) -> dict[str, Any]:
-    outstanding = loan_service.get_outstanding(db, loan)
+def _enrich_loan(loan: Loan, db: Session, outstanding: Decimal | None = None) -> dict[str, Any]:
+    if outstanding is None:
+        outstanding = loan_service.get_outstanding(db, loan)
     computed_status = loan_service.get_computed_loan_status(loan, outstanding)
 
     penalty_info = {"days_overdue": 0, "penalty": Decimal("0")}
@@ -576,7 +577,27 @@ def get_loans(
         stmt = stmt.where(cond)
 
     loans = db.scalars(stmt).unique().all()
-    enriched = [_enrich_loan(loan, db) for loan in loans]
+    repaid_map = dict(
+        db.execute(
+            select(Repayment.loan_id, func.coalesce(func.sum(Repayment.amount), 0))
+            .where(
+                Repayment.loan_id.in_([ln.id for ln in loans]),
+                Repayment.verified.is_(True),
+            )
+            .group_by(Repayment.loan_id)
+        ).all()
+    )
+    enriched = [
+        _enrich_loan(
+            loan,
+            db,
+            outstanding=max(
+                loan.total_repayable - repaid_map.get(loan.id, Decimal("0")),
+                Decimal("0"),
+            ),
+        )
+        for loan in loans
+    ]
 
     # Apply computed status filter after enrichment
     if status_filter:
@@ -646,14 +667,35 @@ def get_installments_calendar(
     )
 
     events = []
-    paid_cache: dict[UUID, dict[UUID, Decimal]] = {}
+    loan_ids = {i.loan_id for i in rows}
+    paid_per_loan = dict(
+        db.execute(
+            select(Repayment.loan_id, func.coalesce(func.sum(Repayment.amount), 0))
+            .where(Repayment.loan_id.in_(loan_ids), Repayment.verified.is_(True))
+            .group_by(Repayment.loan_id)
+        ).all()
+    )
+    all_installments = db.scalars(
+        select(Installment)
+        .where(Installment.loan_id.in_(loan_ids))
+        .order_by(Installment.due_date)
+    ).all()
+    installments_by_loan: dict[UUID, list[Installment]] = {}
+    for inst in all_installments:
+        installments_by_loan.setdefault(inst.loan_id, []).append(inst)
+
+    paid_amounts: dict[UUID, Decimal] = {}
+    for loan_id, insts in installments_by_loan.items():
+        remaining = Decimal(str(paid_per_loan.get(loan_id, Decimal("0"))))
+        for inst in insts:
+            applied = min(remaining, inst.amount)
+            paid_amounts[inst.id] = applied
+            remaining -= applied
+
     for i in rows:
         due = as_nairobi_date(i.due_date)
         is_overdue = due is not None and due < today and i.status.value.lower() != "paid"
-        loan_id = i.loan_id
-        if loan_id not in paid_cache:
-            paid_cache[loan_id] = loan_service.installment_paid_amounts(db, i.loan)
-        paid = paid_cache[loan_id].get(i.id, Decimal("0"))
+        paid = paid_amounts.get(i.id, Decimal("0"))
         events.append(
             {
                 "id": str(i.id),
@@ -952,7 +994,30 @@ def get_repayments(
         stmt = stmt.join(Loan, Repayment.loan_id == Loan.id).where(cond)
 
     repayments = db.scalars(stmt).unique().all()
-    return [_serialize_repayment(r) for r in repayments]
+    return [_serialize_repayment(r, include_media=False) for r in repayments]
+
+
+@router.get("/repayments/{repayment_id}")
+def get_repayment(
+    repayment_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_permission(db, current_user, "repayments.view")
+    repayment = db.scalar(
+        select(Repayment)
+        .options(
+            joinedload(Repayment.loan),
+            joinedload(Repayment.client),
+            joinedload(Repayment.recorded_by),
+            joinedload(Repayment.verified_by),
+        )
+        .where(Repayment.id == repayment_id)
+    )
+    if not repayment:
+        raise HTTPException(status_code=404, detail="Repayment not found")
+    _assert_branch_visible(db, current_user, repayment.loan.branch_id)
+    return _serialize_repayment(repayment)
 
 
 @router.post("/repayments", status_code=status.HTTP_201_CREATED)
@@ -1048,7 +1113,7 @@ def verify_repayment(
     return _serialize_repayment(repayment)
 
 
-def _serialize_repayment(r: Repayment) -> dict[str, Any]:
+def _serialize_repayment(r: Repayment, include_media: bool = True) -> dict[str, Any]:
     return {
         "id": str(r.id),
         "loan_id": str(r.loan_id),
@@ -1060,7 +1125,7 @@ def _serialize_repayment(r: Repayment) -> dict[str, Any]:
         "date": r.date.date().isoformat() if r.date else None,
         "mode": r.mode.value,
         "reference": r.reference,
-        "receipt_photo": r.receipt_photo,
+        "receipt_photo": r.receipt_photo if include_media else None,
         "notes": r.notes,
         "recorded_by": r.recorded_by.full_name if r.recorded_by else None,
         "verified": r.verified,

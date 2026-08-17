@@ -22,6 +22,7 @@
 | Fee permissions | **Dedicated** `fees.view` / `fees.record` / `fees.verify` (2026-08-07); recorder may verify own record (cash at desk) |
 | Estimated asset value | **Client-level business field** `clients.estimated_asset_value` (2026-08-07) |
 | Dashboard scope | **P7 2026-08-07** — rebuild to real data, zero placeholders; inline quick modals removed (they duplicated pages with incomplete forms); Quick Actions navigate to the real pages; trend + quality stats come from an extended `/dashboard/stats`; real audit trail (`audit_logs`) deferred to P7-C |
+| Performance (2026-08-17) | Owner: "app is slow". Approved: **free-tier mitigations only, no paid upgrade** — repayments list slims `receipt_photo` (805 KB → ~7 KB; lazy fetch in drawer via new `GET /repayments/{id}`), loans-list/calendar/notifications outstanding batched into grouped SUM queries (kills per-loan N+1), `GET /health` runs `SELECT 1`, frontend page queries `staleTime: 60s`, GitHub Actions `keep-alive` workflow (cron */5) pings the Render health endpoint |
 
 ---
 

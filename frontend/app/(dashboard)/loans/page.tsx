@@ -504,14 +504,16 @@ export default function LoansPage() {
   const { data: loans = [], isLoading } = useQuery({
     queryKey: ["loans", selectedBranchId],
     queryFn: () => fetchLoansApi(selectedBranchId),
+    staleTime: 60_000,
   });
 
   const { data: clients = [] } = useQuery({
     queryKey: ["clients", selectedBranchId],
     queryFn: () => fetchClientsApi(selectedBranchId),
+    staleTime: 60_000,
   });
 
-  const { data: products = [] } = useQuery({ queryKey: ["loan-products"], queryFn: fetchLoanProductsApi });
+  const { data: products = [] } = useQuery({ queryKey: ["loan-products"], queryFn: fetchLoanProductsApi, staleTime: 60_000 });
 
   const parsedAmount = parseFloat(form.amount);
 

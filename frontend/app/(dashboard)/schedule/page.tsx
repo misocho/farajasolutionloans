@@ -362,6 +362,7 @@ export default function SchedulePage() {
   const { data, isLoading, refetch } = useQuery({
     queryKey: ["installment-calendar", weeksAhead],
     queryFn: () => fetchInstallmentCalendarApi(weeksAhead),
+    staleTime: 60_000,
     refetchInterval: 60_000,
   });
 
