@@ -1,6 +1,7 @@
 from app.models.base import Base, BaseModel
 from app.models.branch import Branch
 from app.models.client import Client
+from app.models.expense import Expense
 from app.models.fee_payment import FeePayment
 from app.models.installment import Installment
 from app.models.loan import Loan
@@ -21,6 +22,7 @@ __all__ = [
     "BaseModel",
     "Branch",
     "Client",
+    "Expense",
     "FeePayment",
     "Installment",
     "Loan",

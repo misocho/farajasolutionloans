@@ -36,6 +36,17 @@ class FeeType(StrEnum):
     APPLICATION = "Application"
 
 
+class ExpenseCategory(StrEnum):
+    SALARIES = "Salaries"
+    RENT = "Rent"
+    UTILITIES = "Utilities"
+    TRANSPORT = "Transport"
+    MARKETING = "Marketing"
+    STATIONERY = "Stationery"
+    OPERATIONS = "Operations"
+    OTHER = "Other"
+
+
 class LoanProductType(StrEnum):
     FARAJA_4_WEEKS = "Faraja4Weeks"
     FARAJA_5_WEEKS = "Faraja5Weeks"
