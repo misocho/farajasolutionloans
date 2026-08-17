@@ -30,6 +30,7 @@ import {
 
 import { StatCard } from "@/components/dashboard/stat-card";
 import { QuickActions } from "@/components/dashboard/quick-actions";
+import { LoanCalculator } from "@/components/dashboard/loan-calculator";
 import { useBranch } from "@/components/layout/branch-selector";
 import { fetchMeApi } from "@/features/auth/api";
 import {
@@ -345,6 +346,7 @@ export default function DashboardPage() {
           </div>
         </>
       )}
+      <LoanCalculator />
     </div>
   );
 }

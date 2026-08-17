@@ -56,6 +56,29 @@ def calculate_installment_amount(total_repayable: Decimal, num_weeks: int) -> De
     return (total_repayable / num_weeks).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
+def quote_loan(product: LoanProduct, amount: Decimal) -> dict:
+    """Estimate a loan against a product plan — same math as disbursement.
+
+    Returns interest, totals, installment schedule shape, and both application
+    fee tiers (new vs existing client). Raises ValueError below the minimum loan.
+    """
+    if amount < Decimal("4000"):
+        raise ValueError("Minimum loan amount is KES 4,000")
+    interest = calculate_interest(product, amount)
+    total = amount + interest
+    num_weeks = product.duration_days // 7
+    if num_weeks < 1:
+        raise ValueError("Product duration must allow at least one weekly installment")
+    return {
+        "interest_amount": interest,
+        "total_repayable": total,
+        "num_installments": num_weeks,
+        "installment_amount": calculate_installment_amount(total, num_weeks),
+        "application_fee_new": calculate_application_fee(amount, False),
+        "application_fee_existing": calculate_application_fee(amount, True),
+    }
+
+
 def calculate_penalty(
     outstanding: Decimal,
     due_date: datetime,

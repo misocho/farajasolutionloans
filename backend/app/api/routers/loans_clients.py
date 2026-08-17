@@ -37,6 +37,7 @@ from app.models.loan import Loan
 from app.models.loan_product import LoanProduct
 from app.models.repayment import Repayment
 from app.models.user import User
+from app.schemas.loan_products import LoanQuoteResponse
 from app.services import fee_service, loan_service
 
 router = APIRouter()
@@ -451,6 +452,23 @@ def get_loan_products(db: Session = Depends(get_db), current_user: User = Depend
         }
         for p in products
     ]
+
+
+@router.get("/loan-products/{product_id}/quote", response_model=LoanQuoteResponse)
+def quote_loan_estimate(
+    product_id: UUID,
+    amount: float,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_permission(db, current_user, "loans.view")
+    product = db.get(LoanProduct, product_id)
+    if not product:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Loan product not found")
+    try:
+        return loan_service.quote_loan(product, Decimal(str(amount)))
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
 
 # ── LOANS ──────────────────────────────────────────────────────────────────────

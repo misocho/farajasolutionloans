@@ -104,6 +104,15 @@ export interface LoanProduct {
   max_penalty_amount?: number | null;
 }
 
+export interface LoanQuote {
+  interest_amount: number;
+  total_repayable: number;
+  num_installments: number;
+  installment_amount: number;
+  application_fee_new: number;
+  application_fee_existing: number;
+}
+
 // ── Client Interface ─────────────────────────────────────────────────────────
 
 export interface Client {
@@ -227,8 +236,15 @@ export async function createLoanApi(data: {
   return res.data;
 }
 
-export async function fetchLoanProductsApi() {
-  const res = await api.get("/loan-products");
+export async function fetchLoanProductsApi(): Promise<LoanProduct[]> {
+  const res = await api.get<LoanProduct[]>("/loan-products");
+  return res.data;
+}
+
+export async function fetchLoanQuoteApi(productId: string, amount: number): Promise<LoanQuote> {
+  const res = await api.get<LoanQuote>(`/loan-products/${productId}/quote`, {
+    params: { amount },
+  });
   return res.data;
 }
 
