@@ -289,3 +289,28 @@ def mark_installments_paid(db: Session, loan: Loan) -> None:
         else:
             break
     db.flush()
+
+
+def installment_paid_amounts(db: Session, loan: Loan) -> dict[UUID, Decimal]:
+    """Cumulative verified payments applied oldest-first to each installment.
+
+    A partially covered installment (e.g. final one with a residual balance)
+    reports the amount actually paid against it; fully unpaid ones report 0.
+    """
+    paid_total = db.scalar(
+        select(func.coalesce(func.sum(Repayment.amount), 0)).where(
+            Repayment.loan_id == loan.id, Repayment.verified.is_(True)
+        )
+    ) or Decimal("0")
+
+    installments = db.scalars(
+        select(Installment).where(Installment.loan_id == loan.id).order_by(Installment.due_date)
+    ).all()
+
+    remaining = Decimal(str(paid_total))
+    amounts: dict[UUID, Decimal] = {}
+    for inst in installments:
+        applied = min(remaining, inst.amount)
+        amounts[inst.id] = applied
+        remaining -= applied
+    return amounts

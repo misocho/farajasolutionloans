@@ -11,6 +11,12 @@ const STATUS_PILL: Record<Installment["status"], { label: string; cls: string; i
   Missed:  { label: "Missed",  cls: "bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/20 dark:text-rose-400 dark:border-rose-800", icon: XCircle },
 };
 
+const PARTIAL_PILL = {
+  label: "Partial",
+  cls: "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/20 dark:text-orange-400 dark:border-orange-800",
+  icon: AlertCircle,
+};
+
 export function InstallmentTimeline({ installments }: { installments: Installment[] }) {
   const paid = installments.filter(i => i.status === "Paid").length;
   return (
@@ -29,17 +35,20 @@ export function InstallmentTimeline({ installments }: { installments: Installmen
       </div>
       <div className="space-y-1.5">
         {installments.map((inst) => {
-          const pill = STATUS_PILL[inst.status];
+          const isPartial = inst.status !== "Paid" && inst.paid_amount > 0;
+          const pill = isPartial ? PARTIAL_PILL : STATUS_PILL[inst.status];
           const Icon = pill.icon;
+          const remaining = Math.max(inst.amount - inst.paid_amount, 0);
           return (
             <div key={inst.id} className="flex items-center justify-between p-2.5 rounded-xl border border-zinc-100 dark:border-zinc-800 bg-zinc-50/30">
               <div className="flex items-center gap-2 min-w-0">
-                <Icon className={`size-3.5 shrink-0 ${inst.status === "Paid" ? "text-emerald-500" : inst.status === "Missed" ? "text-rose-500" : inst.status === "Late" ? "text-amber-500" : "text-zinc-400"}`} />
+                <Icon className={`size-3.5 shrink-0 ${inst.status === "Paid" ? "text-emerald-500" : isPartial ? "text-orange-500" : inst.status === "Missed" ? "text-rose-500" : inst.status === "Late" ? "text-amber-500" : "text-zinc-400"}`} />
                 <div className="min-w-0">
                   <p className="text-xs font-bold text-zinc-800 dark:text-zinc-200">{formatKES(inst.amount)}</p>
                   <p className="text-[10px] text-zinc-400">
                     Due {formatDate(inst.due_date, { day: "2-digit", month: "short", year: "numeric" })}
-                    {inst.paid_at && ` · Paid ${formatDate(inst.paid_at, { day: "2-digit", month: "short" })}`}
+                    {inst.status === "Paid" && inst.paid_at && ` · Paid ${formatDate(inst.paid_at, { day: "2-digit", month: "short" })}`}
+                    {isPartial && ` · ${formatKES(inst.paid_amount)} paid · ${formatKES(remaining)} remaining`}
                   </p>
                 </div>
               </div>

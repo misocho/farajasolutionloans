@@ -598,6 +598,7 @@ def get_loan(
     installments = db.scalars(
         select(Installment).where(Installment.loan_id == loan_id).order_by(Installment.due_date)
     ).all()
+    paid_amounts = loan_service.installment_paid_amounts(db, loan)
     result["installments"] = [
         {
             "id": str(i.id),
@@ -605,6 +606,7 @@ def get_loan(
             "amount": float(i.amount),
             "status": i.status.value,
             "paid_at": i.paid_at.isoformat() if i.paid_at else None,
+            "paid_amount": float(paid_amounts.get(i.id, Decimal("0"))),
         }
         for i in installments
     ]
@@ -1028,6 +1030,7 @@ def verify_repayment(
         raise HTTPException(status_code=400, detail="Already verified")
     repayment.verified = True
     repayment.verified_by_id = current_user.id
+    db.flush()
     audit_service.write_audit_log(
         db, current_user.id, current_user.full_name, "repayment.verify", "repayment",
         repayment.id, branch_id=repayment.loan.branch_id,

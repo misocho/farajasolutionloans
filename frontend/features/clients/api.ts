@@ -95,6 +95,7 @@ export interface Installment {
   amount: number;
   status: "Pending" | "Paid" | "Missed" | "Late";
   paid_at: string | null;
+  paid_amount: number;
 }
 
 export interface LoanProduct {
