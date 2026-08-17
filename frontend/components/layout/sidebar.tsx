@@ -11,6 +11,7 @@ import {
   Receipt,
   BarChart3,
   CalendarDays,
+  Bell,
   Settings,
   ShieldCheck,
   LogOut,
@@ -88,6 +89,7 @@ export function Sidebar({ onClose }: SidebarProps) {
     { name: "Clients", href: "/clients", icon: Users },
     { name: "Repayments", href: "/repayments", icon: Receipt },
     { name: "Schedule", href: "/schedule", icon: CalendarDays },
+    { name: "Notifications", href: "/notifications", icon: Bell },
     { name: "Reports", href: "/reports", icon: BarChart3 },
   ];
 

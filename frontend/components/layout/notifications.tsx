@@ -1,8 +1,9 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
+import { useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Bell, Flame, Clock, CheckCircle2, ShieldAlert, RefreshCw, Loader2, CalendarClock, Hourglass } from "lucide-react";
+import { Bell, RefreshCw, Loader2, CheckCircle2 } from "lucide-react";
 import {
   Popover,
   PopoverContent,
@@ -15,39 +16,17 @@ import {
   markNotificationReadApi,
   type AppNotification,
 } from "@/features/clients/api";
-
-const PRIORITY_CFG = {
-  critical: { color: "text-rose-600", bg: "bg-rose-50 dark:bg-rose-950/20", icon: Flame },
-  high:     { color: "text-amber-600", bg: "bg-amber-50 dark:bg-amber-950/20", icon: Clock },
-  medium:   { color: "text-blue-600",  bg: "bg-blue-50 dark:bg-blue-950/20",  icon: CheckCircle2 },
-  low:      { color: "text-zinc-500",  bg: "",                                 icon: ShieldAlert },
-};
-
-const TYPE_ICON: Record<string, React.ElementType> = {
-  due_today:        Flame,
-  due_tomorrow:     Clock,
-  almost_due:       CalendarClock,
-  arrears:          Hourglass,
-  repayment_pending: ShieldAlert,
-  pending_approval: CheckCircle2,
-};
-
-function timeAgo(dateStr: string) {
-  if (!dateStr) return "";
-  try {
-    const d = new Date(dateStr);
-    const diffMs = Date.now() - d.getTime();
-    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-    if (diffDays === 0) return "today";
-    if (diffDays === 1) return "yesterday";
-    return `${diffDays}d ago`;
-  } catch {
-    return dateStr;
-  }
-}
+import {
+  PRIORITY_CFG,
+  TYPE_ICON,
+  timeAgo,
+  notificationTarget,
+} from "@/app/lib/notifications";
 
 export function Notifications() {
+  const router = useRouter();
   const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["notifications"],
@@ -58,21 +37,32 @@ export function Notifications() {
   const notifications = data?.notifications ?? [];
   const unreadCount = data?.unread_count ?? notifications.filter(n => !n.read).length;
 
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["notifications"] });
+
   const markAllReadMutation = useMutation({
     mutationFn: markAllNotificationsReadApi,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["notifications"] }),
+    onSuccess: invalidate,
   });
 
   const markReadMutation = useMutation({
     mutationFn: markNotificationReadApi,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["notifications"] }),
+    onSuccess: invalidate,
   });
 
-  const markAllRead = () => markAllReadMutation.mutate();
-  const markRead = (id: string) => markReadMutation.mutate(id);
+  const handleClick = (notif: AppNotification) => {
+    setOpen(false);
+    if (!notif.read) markReadMutation.mutate(notif.id);
+    const target = notificationTarget(notif);
+    if (target) router.push(target);
+  };
+
+  const viewAll = () => {
+    setOpen(false);
+    router.push("/notifications");
+  };
 
   return (
-    <Popover>
+    <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger className="relative p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-colors cursor-pointer focus:outline-none">
         <Bell className="size-5 text-zinc-600 dark:text-zinc-300" />
         {unreadCount > 0 && (
@@ -95,14 +85,14 @@ export function Notifications() {
           </PopoverTitle>
           <div className="flex items-center gap-2">
             <button
-              onClick={() => queryClient.invalidateQueries({ queryKey: ["notifications"] })}
+              onClick={invalidate}
               className="text-zinc-400 hover:text-zinc-600 transition-colors cursor-pointer"
               title="Refresh"
             >
               <RefreshCw className="size-3.5" />
             </button>
             {unreadCount > 0 && (
-              <button onClick={markAllRead} className="text-[10px] text-[#0D44A2] font-bold hover:underline cursor-pointer">
+              <button onClick={() => markAllReadMutation.mutate()} className="text-[10px] text-[#0D44A2] font-bold hover:underline cursor-pointer">
                 Mark all read
               </button>
             )}
@@ -133,7 +123,7 @@ export function Notifications() {
               return (
                 <button
                   key={notif.id}
-                  onClick={() => markRead(notif.id)}
+                  onClick={() => handleClick(notif)}
                   className={`w-full p-4 flex gap-3 text-left transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-850/30 cursor-pointer ${
                     !isRead ? "bg-[#0D44A2]/[0.03] dark:bg-[#0D44A2]/10" : ""
                   }`}
@@ -168,10 +158,16 @@ export function Notifications() {
 
         {/* Footer */}
         {notifications.length > 0 && (
-          <div className="px-4 py-2.5 border-t border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50">
-            <p className="text-[10px] text-zinc-400 text-center">
-              {notifications.length} active notifications · Auto-refreshes every 30s
+          <div className="px-4 py-2.5 border-t border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50 flex items-center justify-between">
+            <p className="text-[10px] text-zinc-400">
+              {notifications.length} active · refreshes every 30s
             </p>
+            <button
+              onClick={viewAll}
+              className="text-[10px] text-[#0D44A2] font-bold hover:underline cursor-pointer"
+            >
+              View all
+            </button>
           </div>
         )}
       </PopoverContent>

@@ -150,6 +150,7 @@ ROLE_PERMISSIONS = {
     ],
     "Finance Officer": [
         "dashboard.view",
+        "loans.view",
         "repayments.view",
         "repayments.record",
         "repayments.verify",

@@ -22,7 +22,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.dependencies.auth import get_current_user
-from app.core.permissions import get_user_permissions
+from app.core.permissions import get_user_branch_ids, get_user_permissions
 from app.db.session import get_db
 from app.models.enums import LoanStatus
 from app.models.loan import Loan
@@ -67,6 +67,10 @@ def _build_notifications(db: Session, current_user: User) -> list[dict]:
     notifications = []
     prefs = _get_prefs(db, current_user.id)
 
+    # Branch scope: None = unrestricted roles (see all); list = scoped to those branches
+    branch_ids = get_user_branch_ids(current_user)
+    scoped = [] if branch_ids is None else [Loan.branch_id.in_(branch_ids)]
+
     # 1. Loans due today
     if prefs.get("due_today", True):
         due_today = db.scalars(
@@ -76,6 +80,7 @@ def _build_notifications(db: Session, current_user: User) -> list[dict]:
                 Loan.status == LoanStatus.DISBURSED,
                 Loan.due_date >= datetime(today.year, today.month, today.day, tzinfo=UTC),
                 Loan.due_date < datetime(tomorrow.year, tomorrow.month, tomorrow.day, tzinfo=UTC),
+                *scoped,
             )
         ).unique().all()
 
@@ -101,6 +106,7 @@ def _build_notifications(db: Session, current_user: User) -> list[dict]:
                 Loan.due_date < datetime((tomorrow + timedelta(days=1)).year,
                                          (tomorrow + timedelta(days=1)).month,
                                          (tomorrow + timedelta(days=1)).day, tzinfo=UTC),
+                *scoped,
             )
         ).unique().all()
 
@@ -125,6 +131,7 @@ def _build_notifications(db: Session, current_user: User) -> list[dict]:
                 Loan.status == LoanStatus.DISBURSED,
                 Loan.due_date >= datetime(day_after_tomorrow.year, day_after_tomorrow.month, day_after_tomorrow.day, tzinfo=UTC),
                 Loan.due_date < datetime(almost_due_threshold.year, almost_due_threshold.month, almost_due_threshold.day, tzinfo=UTC) + timedelta(days=1),
+                *scoped,
             )
         ).unique().all()
 
@@ -147,6 +154,7 @@ def _build_notifications(db: Session, current_user: User) -> list[dict]:
             .where(
                 Loan.status == LoanStatus.DISBURSED,
                 Loan.due_date < datetime(today.year, today.month, today.day, tzinfo=UTC),
+                *scoped,
             )
         ).unique().all()
 
@@ -164,13 +172,18 @@ def _build_notifications(db: Session, current_user: User) -> list[dict]:
 
     # 5. Unverified repayments
     if prefs.get("repayment_pending", True):
-        unverified = db.scalars(
+        unverified_query = (
             select(Repayment)
             .options(joinedload(Repayment.loan), joinedload(Repayment.client))
             .where(Repayment.verified == False)
             .order_by(Repayment.date.desc())
             .limit(20)
-        ).unique().all()
+        )
+        if branch_ids is not None:
+            unverified_query = (
+                unverified_query.join(Repayment.loan).where(Loan.branch_id.in_(branch_ids))
+            )
+        unverified = db.scalars(unverified_query).unique().all()
 
         for rep in unverified:
             notifications.append({
@@ -191,7 +204,7 @@ def _build_notifications(db: Session, current_user: User) -> list[dict]:
             pending_loans = db.scalars(
                 select(Loan)
                 .options(joinedload(Loan.client))
-                .where(Loan.status == LoanStatus.PENDING)
+                .where(Loan.status == LoanStatus.PENDING, *scoped)
                 .order_by(Loan.date_submitted.desc())
                 .limit(10)
             ).unique().all()

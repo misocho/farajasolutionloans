@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Banknote, Plus, Search, Eye, X, Loader2, CheckCircle2, Clock,
@@ -412,18 +412,21 @@ export default function LoansPage() {
   const [feeForm, setFeeForm] = useState({ mode: "Cash", reference: "", notes: "" });
 
   // ── Deep-links: /loans?loan=<id> opens the drawer, /loans?apply=true opens the form ──
-  if (typeof window !== "undefined" && !selectedLoanId && deepLinkLoanId === null) {
+  // One-shot on mount (avoids useSearchParams Suspense constraint); param cleared via replaceState.
+  useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const loanParam = params.get("loan");
     const applyParam = params.get("apply");
     if (loanParam) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setDeepLinkLoanId(loanParam);
       window.history.replaceState({}, "", window.location.pathname);
     } else if (applyParam === "true" && !showNewForm) {
       setShowNewForm(true);
       window.history.replaceState({}, "", window.location.pathname);
     }
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const { selectedBranchId } = useBranch();
 
