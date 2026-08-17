@@ -310,7 +310,8 @@ export default function RepaymentsPage() {
     queryFn: () => fetchLoansApi(selectedBranchId),
   });
 
-  const disbursedLoans = loans.filter(l => l.status === "Disbursed");
+  // Active loans = DB status Disbursed (computed status may be Defaulter/Arrears/etc.)
+  const disbursedLoans = loans.filter(l => l.db_status === "Disbursed");
 
   const createMut = useMutation({
     mutationFn: () => createRepaymentApi({

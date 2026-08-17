@@ -72,6 +72,10 @@ export interface Loan {
   disbursed_date?: string | null;
   due_date?: string | null;
   status: LoanStatus;
+  // DB status (the 5 workflow states) — `status` above is the computed one
+  db_status: "Pending" | "Approved" | "Disbursed" | "Rejected" | "Closed";
+  status_override?: string | null;
+  status_override_by?: string | null;
   // Computed fields from backend
   interest_amount: number;
   total_repayable: number;
@@ -290,6 +294,16 @@ export async function disburseLoanApi(id: string, officer_name?: string, duratio
 
 export async function closeLoanApi(id: string, officer_name?: string): Promise<Loan> {
   const res = await api.patch<Loan>(`/loans/${id}/close`, { officer_name });
+  return res.data;
+}
+
+export async function addLoanNoteApi(id: string, note: string): Promise<Loan> {
+  const res = await api.patch<Loan>(`/loans/${id}/notes`, { note });
+  return res.data;
+}
+
+export async function updateLoanStatusApi(id: string, status_override: string | null): Promise<Loan> {
+  const res = await api.patch<Loan>(`/loans/${id}/status`, { status_override });
   return res.data;
 }
 

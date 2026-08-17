@@ -6,7 +6,7 @@ import {
   Banknote, Plus, Search, Eye, X, Loader2, CheckCircle2, Clock,
   XCircle, ArrowUpRight, Filter, AlertTriangle, ChevronRight, TrendingUp,
   ThumbsUp, ThumbsDown, Send, Lock, Info, Receipt, Calendar,
-  BadgeCheck, Flame, Save,
+  BadgeCheck, Flame, Save, StickyNote, Tag,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -17,13 +17,14 @@ import {
   fetchLoansApi, fetchLoanApi, createLoanApi, approveLoanApi,
   rejectLoanApi, disburseLoanApi, closeLoanApi, fetchClientsApi,
   fetchLoanProductsApi, fetchFeeQuoteApi, fetchFeesApi,
-  recordFeeApi, verifyFeeApi,
+  recordFeeApi, verifyFeeApi, addLoanNoteApi, updateLoanStatusApi,
   type Loan, type LoanStatus, type Client, type LoanProduct,
 } from "@/features/clients/api";
 
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { InstallmentTimeline } from "@/components/loans/installment-timeline";
 
@@ -130,6 +131,7 @@ function LoanDrawer({
   const queryClient = useQueryClient();
   const [actionNote, setActionNote] = useState("");
   const [showNoteInput, setShowNoteInput] = useState<null | "approve" | "reject">(null);
+  const [noteText, setNoteText] = useState("");
 
   const { data: loan, isLoading } = useQuery({
     queryKey: ["loan", loanId],
@@ -165,12 +167,25 @@ function LoanDrawer({
     onError: (e: any) => toast.error(e.response?.data?.detail || "Cannot close: " + e.response?.data?.detail),
   });
 
-  const anyPending = approveMut.isPending || rejectMut.isPending || disburseMut.isPending || closeMut.isPending;
+  const noteMut = useMutation({
+    mutationFn: () => addLoanNoteApi(loanId, noteText.trim()),
+    onSuccess: () => { toast.success("Note added"); setNoteText(""); invalidate(); },
+    onError: (e) => toast.error((e as ApiError).response?.data?.detail || "Failed to add note"),
+  });
+
+  const statusMut = useMutation({
+    mutationFn: (override: string | null) => updateLoanStatusApi(loanId, override),
+    onSuccess: () => { toast.success("Loan status updated"); invalidate(); },
+    onError: (e) => toast.error((e as ApiError).response?.data?.detail || "Failed to update status"),
+  });
+
+  const anyPending = approveMut.isPending || rejectMut.isPending || disburseMut.isPending || closeMut.isPending || noteMut.isPending || statusMut.isPending;
 
   const has = (p: string) => permissions.includes(p);
   const canApprove = has("loans.approve");
   const canDisburse = has("loans.disburse");
   const canReject = has("loans.reject");
+  const canUpdate = has("loans.update");
   const canAct = canApprove || canDisburse || canReject;
 
   return (
@@ -248,7 +263,15 @@ function LoanDrawer({
               {loan.submitted_by && <MoneyRow label="Submitted By" value={loan.submitted_by} />}
               {loan.approved_by && <MoneyRow label="Approved By" value={loan.approved_by} />}
               {loan.disbursed_by && <MoneyRow label="Disbursed By" value={loan.disbursed_by} />}
-              {loan.notes && <MoneyRow label="Notes" value={loan.notes} />}
+              {loan.status_override && loan.status_override_by && (
+                <MoneyRow label="Status Marked By" value={`${loan.status_override_by} → ${loan.status_override}`} color="text-[#0D44A2]" />
+              )}
+              {loan.notes && (
+                <div className="py-2 border-b border-zinc-100 dark:border-zinc-800 last:border-0">
+                  <p className="text-xs text-zinc-500 font-bold">Notes</p>
+                  <p className="text-xs text-zinc-700 dark:text-zinc-300 whitespace-pre-wrap mt-1">{loan.notes}</p>
+                </div>
+              )}
               {loan.approval_note && <MoneyRow label="Approval Note" value={loan.approval_note} />}
               {loan.rejection_reason && (
                 <MoneyRow label="Rejection Reason" value={loan.rejection_reason} color="text-rose-600" />
@@ -370,6 +393,54 @@ function LoanDrawer({
                     {anyPending ? <Loader2 className="animate-spin size-3.5" /> : <BadgeCheck className="size-3.5 mr-1.5" />}
                     Mark Loan as Closed
                   </Button>
+                )}
+
+                {/* Manager/Director: manual status override on active loans */}
+                {canUpdate && loan.db_status === "Disbursed" && (
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold">Loan Status (manual override)</Label>
+                    <select
+                      value={loan.status_override ?? "Auto"}
+                      onChange={(e) => statusMut.mutate(e.target.value === "Auto" ? null : e.target.value)}
+                      disabled={statusMut.isPending}
+                      className="w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 px-3 py-2.5 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-primary/20"
+                    >
+                      <option value="Auto">Auto (computed)</option>
+                      <option value="Defaulter">Defaulter</option>
+                      <option value="Past Maturity">Past Maturity</option>
+                      <option value="Arrears">Arrears</option>
+                      <option value="Performing">Performing</option>
+                      <option value="Almost Due">Almost Due</option>
+                      <option value="Due">Due</option>
+                    </select>
+                    {loan.status_override && (
+                      <p className="text-[10px] text-zinc-400">
+                        <Tag className="size-3 inline mr-1" />
+                        Marked by {loan.status_override_by ?? "a manager"} — choose Auto to clear.
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* Manager/Director: add a note to the loan */}
+                {canUpdate && (
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold">Add Note</Label>
+                    <Textarea
+                      value={noteText}
+                      onChange={(e) => setNoteText(e.target.value)}
+                      placeholder="e.g. Client visited the branch, promised payment Friday"
+                      className="rounded-xl text-sm min-h-[70px]"
+                    />
+                    <Button
+                      onClick={() => noteMut.mutate()}
+                      disabled={noteMut.isPending || !noteText.trim()}
+                      className="w-full bg-zinc-800 hover:bg-zinc-900 text-white rounded-xl h-9 text-xs font-bold dark:bg-zinc-700"
+                    >
+                      {noteMut.isPending ? <Loader2 className="animate-spin size-3.5" /> : <StickyNote className="size-3.5 mr-1.5" />}
+                      Add Note
+                    </Button>
+                  </div>
                 )}
 
                 {/* Role restriction message */}

@@ -37,6 +37,12 @@ class Loan(BaseModel):
     approval_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Manual status override (Manager/Director): a computed status (e.g. "Defaulter")
+    # that takes precedence over the read-time computed status for disbursed loans.
+    status_override: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    status_override_by_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    status_override_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
     # ── Officers ──────────────────────────────────────────────────────────────
     submitted_by_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     approved_by_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
@@ -55,6 +61,7 @@ class Loan(BaseModel):
     submitted_by: Mapped["User | None"] = relationship("User", foreign_keys=[submitted_by_id], lazy="joined")  # type: ignore
     approved_by: Mapped["User | None"] = relationship("User", foreign_keys=[approved_by_id], lazy="joined")  # type: ignore
     disbursed_by: Mapped["User | None"] = relationship("User", foreign_keys=[disbursed_by_id], lazy="joined")  # type: ignore
+    status_override_by: Mapped["User | None"] = relationship("User", foreign_keys=[status_override_by_id], lazy="joined")  # type: ignore
     installments: Mapped[list["Installment"]] = relationship("Installment", back_populates="loan", cascade="all, delete-orphan", lazy="select")
     repayments: Mapped[list["Repayment"]] = relationship("Repayment", back_populates="loan", cascade="all, delete-orphan", lazy="select")
 

@@ -133,8 +133,13 @@ def get_computed_loan_status(loan: Loan, outstanding: Decimal) -> str:
         due = as_nairobi_date(loan.due_date)
         days_overdue = (today - due).days
 
+        # Fully repaid loans are always "Paid" — a manual override must not
+        # keep a paid loan flagged (e.g. stuck as "Defaulter").
         if outstanding <= 0:
             return "Paid"
+        # Manual status override (Manager/Director) wins over the derived state.
+        if loan.status_override:
+            return loan.status_override
         if days_overdue > 30:
             return "Defaulter"
         if days_overdue > 0:

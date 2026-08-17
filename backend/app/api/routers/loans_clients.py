@@ -17,15 +17,17 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import List, Optional
+from typing import Any, List, Optional
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.dependencies.auth import get_current_user
+from app.core.config import settings
 from app.core.permissions import get_user_branch_ids, get_user_permissions
 from app.core.time import as_nairobi_date
 from app.db.session import get_db
@@ -115,7 +117,7 @@ def _resolve_branch_assignment(
 # ── CLIENTS ────────────────────────────────────────────────────────────────────
 
 
-def _enrich_loan(loan: Loan, db: Session) -> dict:
+def _enrich_loan(loan: Loan, db: Session) -> dict[str, Any]:
     outstanding = loan_service.get_outstanding(db, loan)
     computed_status = loan_service.get_computed_loan_status(loan, outstanding)
 
@@ -144,6 +146,8 @@ def _enrich_loan(loan: Loan, db: Session) -> dict:
         "duration_days": loan.duration_days,
         "status": computed_status,
         "db_status": loan.status.value,
+        "status_override": loan.status_override,
+        "status_override_by": _user_str(loan.status_override_by),
         "notes": loan.notes,
         "approval_note": loan.approval_note,
         "rejection_reason": loan.rejection_reason,
@@ -271,6 +275,20 @@ class LoanActionRequest(BaseModel):
     note: Optional[str] = None
 
 
+class LoanNoteRequest(BaseModel):
+    note: str = Field(min_length=1, max_length=2000)
+
+
+class LoanStatusOverrideRequest(BaseModel):
+    status_override: Optional[str] = None
+
+
+# Manual statuses a Manager/Director may set on a disbursed loan.
+# "Paid" is excluded on purpose: fully repaid loans derive it automatically
+# and an override could otherwise hide outstanding debt.
+_STATUS_OVERRIDES = {"Defaulter", "Past Maturity", "Arrears", "Performing", "Almost Due", "Due"}
+
+
 class RepaymentCreateRequest(BaseModel):
     loan_id: UUID
     amount: float
@@ -364,7 +382,7 @@ def update_client(
     return _serialize_client(client)
 
 
-def _serialize_client(c: Client, include_media: bool = True) -> dict:
+def _serialize_client(c: Client, include_media: bool = True) -> dict[str, Any]:
     data = {
         "id": str(c.id),
         "client_number": c.client_number,
@@ -506,6 +524,7 @@ def get_loans(
             joinedload(Loan.submitted_by),
             joinedload(Loan.approved_by),
             joinedload(Loan.disbursed_by),
+            joinedload(Loan.status_override_by),
         )
         .order_by(Loan.created_at.desc())
     )
@@ -745,6 +764,50 @@ def close_loan(
     return _enrich_loan(loan, db)
 
 
+@router.patch("/loans/{loan_id}/notes")
+def add_loan_note(
+    loan_id: UUID,
+    request: LoanNoteRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    _require_permission(db, current_user, "loans.update")
+    loan = _load_loan(loan_id, db)
+    now_nairobi = datetime.now(ZoneInfo(settings.DEFAULT_TIMEZONE))
+    entry = f"[{now_nairobi:%d %b %Y %H:%M} — {current_user.full_name}] {request.note.strip()}"
+    loan.notes = f"{loan.notes}\n{entry}" if loan.notes else entry
+    db.commit()
+    return _enrich_loan(loan, db)
+
+
+@router.patch("/loans/{loan_id}/status")
+def set_loan_status_override(
+    loan_id: UUID,
+    request: LoanStatusOverrideRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    _require_permission(db, current_user, "loans.update")
+    loan = _load_loan(loan_id, db)
+    if loan.status != LoanStatus.DISBURSED:
+        raise HTTPException(
+            status_code=400,
+            detail="Status override only applies to disbursed loans",
+        )
+    value = request.status_override
+    if value is not None and value not in _STATUS_OVERRIDES:
+        allowed = ", ".join(sorted(_STATUS_OVERRIDES))
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid status override: {value}. Allowed: {allowed}",
+        )
+    loan.status_override = value
+    loan.status_override_by_id = current_user.id if value else None
+    loan.status_override_at = datetime.now(timezone.utc) if value else None
+    db.commit()
+    return _enrich_loan(loan, db)
+
+
 def _load_loan(loan_id: UUID, db: Session) -> Loan:
     loan = db.scalar(
         select(Loan)
@@ -755,6 +818,7 @@ def _load_loan(loan_id: UUID, db: Session) -> Loan:
             joinedload(Loan.submitted_by),
             joinedload(Loan.approved_by),
             joinedload(Loan.disbursed_by),
+            joinedload(Loan.status_override_by),
         )
         .where(Loan.id == loan_id)
     )
@@ -878,7 +942,7 @@ def verify_repayment(
     return _serialize_repayment(repayment)
 
 
-def _serialize_repayment(r: Repayment) -> dict:
+def _serialize_repayment(r: Repayment) -> dict[str, Any]:
     return {
         "id": str(r.id),
         "loan_id": str(r.loan_id),
