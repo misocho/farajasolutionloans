@@ -24,6 +24,7 @@ from app.models.branch import Branch
 from app.models.enums import ExpenseCategory, PaymentMode
 from app.models.expense import Expense
 from app.models.user import User
+from app.services import audit_service
 
 router = APIRouter()
 
@@ -99,6 +100,12 @@ def create_expense(
         recorded_by_id=current_user.id,
     )
     db.add(expense)
+    db.flush()
+    audit_service.write_audit_log(
+        db, current_user.id, current_user.full_name, "expense.record", "expense",
+        expense.id, branch_id=expense.branch_id,
+        meta={"amount": str(expense.amount), "category": expense.category.value},
+    )
     db.commit()
     db.refresh(expense)
     return _serialize_expense(expense)
@@ -125,6 +132,10 @@ def verify_expense(
     expense.verified = True
     expense.verified_by_id = current_user.id
     expense.verified_at = datetime.now(UTC)
+    audit_service.write_audit_log(
+        db, current_user.id, current_user.full_name, "expense.verify", "expense",
+        expense.id, branch_id=expense.branch_id, meta={"amount": str(expense.amount)},
+    )
     db.commit()
     db.refresh(expense)
     return _serialize_expense(expense)

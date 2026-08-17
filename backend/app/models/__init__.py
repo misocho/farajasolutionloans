@@ -1,4 +1,5 @@
 from app.models.base import Base, BaseModel
+from app.models.audit_log import AuditLog
 from app.models.branch import Branch
 from app.models.client import Client
 from app.models.expense import Expense
@@ -20,6 +21,7 @@ from app.models.user_role import UserRole
 __all__ = [
     "Base",
     "BaseModel",
+    "AuditLog",
     "Branch",
     "Client",
     "Expense",

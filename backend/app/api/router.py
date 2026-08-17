@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.api.routers.admin import router as admin_router
+from app.api.routers.audit import router as audit_router
 from app.api.routers.auth import router as auth_router
 from app.api.routers.branches import router as branches_router
 from app.api.routers.expenses import router as expenses_router
@@ -18,6 +19,7 @@ api_router.include_router(health_router)
 
 api_router.include_router(auth_router)
 api_router.include_router(admin_router)
+api_router.include_router(audit_router)
 api_router.include_router(loans_clients_router)
 api_router.include_router(branches_router)
 api_router.include_router(reports_router)

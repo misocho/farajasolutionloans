@@ -41,7 +41,7 @@ from app.models.loan_product import LoanProduct
 from app.models.repayment import Repayment
 from app.models.user import User
 from app.schemas.loan_products import LoanQuoteResponse
-from app.services import fee_service, loan_service
+from app.services import audit_service, fee_service, loan_service
 
 router = APIRouter()
 
@@ -352,6 +352,10 @@ def create_client(
         **data,
     )
     db.add(client)
+    audit_service.write_audit_log(
+        db, current_user.id, current_user.full_name, "client.create", "client",
+        client.id, branch_id=client.branch_id,
+    )
     db.commit()
     db.refresh(client)
     return _serialize_client(client)
@@ -681,6 +685,10 @@ def create_loan(
     db.add(loan)
     db.flush()
     paid_fee.loan_id = loan.id
+    audit_service.write_audit_log(
+        db, current_user.id, current_user.full_name, "loan.create", "loan",
+        loan.id, branch_id=loan.branch_id,
+    )
     db.commit()
     db.refresh(loan)
     return _enrich_loan(loan, db)
@@ -700,6 +708,10 @@ def approve_loan(
         loan_service.approve_loan(db, loan, current_user.id, request.note)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    audit_service.write_audit_log(
+        db, current_user.id, current_user.full_name, "loan.approve", "loan",
+        loan.id, branch_id=loan.branch_id, meta={"note": request.note} if request.note else None,
+    )
     db.commit()
     return _enrich_loan(loan, db)
 
@@ -718,6 +730,10 @@ def reject_loan(
         loan_service.reject_loan(db, loan, current_user.id, request.note)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    audit_service.write_audit_log(
+        db, current_user.id, current_user.full_name, "loan.reject", "loan",
+        loan.id, branch_id=loan.branch_id, meta={"reason": request.note} if request.note else None,
+    )
     db.commit()
     return _enrich_loan(loan, db)
 
@@ -738,6 +754,10 @@ def disburse_loan(
         loan_service.disburse_loan(db, loan, current_user.id, loan.loan_product)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    audit_service.write_audit_log(
+        db, current_user.id, current_user.full_name, "loan.disburse", "loan",
+        loan.id, branch_id=loan.branch_id,
+    )
     db.commit()
     return _enrich_loan(loan, db)
 
@@ -761,6 +781,10 @@ def close_loan(
         loan_service.close_loan(db, loan, current_user.id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    audit_service.write_audit_log(
+        db, current_user.id, current_user.full_name, "loan.close", "loan",
+        loan.id, branch_id=loan.branch_id,
+    )
     db.commit()
     return _enrich_loan(loan, db)
 
@@ -778,6 +802,10 @@ def add_loan_note(
     now_nairobi = datetime.now(ZoneInfo(settings.DEFAULT_TIMEZONE))
     entry = f"[{now_nairobi:%d %b %Y %H:%M} — {current_user.full_name}] {request.note.strip()}"
     loan.notes = f"{loan.notes}\n{entry}" if loan.notes else entry
+    audit_service.write_audit_log(
+        db, current_user.id, current_user.full_name, "loan.note", "loan",
+        loan.id, branch_id=loan.branch_id, meta={"note": request.note.strip()},
+    )
     db.commit()
     return _enrich_loan(loan, db)
 
@@ -807,6 +835,10 @@ def set_loan_status_override(
     loan.status_override = value
     loan.status_override_by_id = current_user.id if value else None
     loan.status_override_at = datetime.now(timezone.utc) if value else None
+    audit_service.write_audit_log(
+        db, current_user.id, current_user.full_name, "loan.status_override", "loan",
+        loan.id, branch_id=loan.branch_id, meta={"status_override": value} if value else None,
+    )
     db.commit()
     return _enrich_loan(loan, db)
 
@@ -912,6 +944,12 @@ def create_repayment(
         verified=False,
     )
     db.add(repayment)
+    db.flush()
+    audit_service.write_audit_log(
+        db, current_user.id, current_user.full_name, "repayment.record", "repayment",
+        repayment.id, branch_id=loan.branch_id,
+        meta={"amount": str(repayment.amount), "mode": pay_mode.value},
+    )
     db.commit()
     db.refresh(repayment)
     return _serialize_repayment(repayment)
@@ -941,6 +979,11 @@ def verify_repayment(
         raise HTTPException(status_code=400, detail="Already verified")
     repayment.verified = True
     repayment.verified_by_id = current_user.id
+    audit_service.write_audit_log(
+        db, current_user.id, current_user.full_name, "repayment.verify", "repayment",
+        repayment.id, branch_id=repayment.loan.branch_id,
+        meta={"amount": str(repayment.amount)},
+    )
     repayment.verified_at = datetime.now(timezone.utc)
     loan_service.mark_installments_paid(db, repayment.loan)
     db.commit()

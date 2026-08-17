@@ -19,6 +19,7 @@ import {
   Building2,
   ChevronRight,
   X,
+  FileClock,
 } from "lucide-react";
 
 import { toast } from "sonner";
@@ -96,6 +97,10 @@ export function Sidebar({ onClose }: SidebarProps) {
   if (isAdminRole) {
     navItems.push({ name: "Branches", href: "/branches", icon: Building2 });
     navItems.push({ name: "Admin Console", href: "/users", icon: ShieldCheck });
+  }
+
+  if (!userLoading && user?.permissions?.includes("audit.view")) {
+    navItems.push({ name: "Audit Logs", href: "/audit", icon: FileClock });
   }
 
   navItems.push({ name: "Settings", href: "/settings", icon: Settings });

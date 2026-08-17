@@ -26,7 +26,7 @@ from app.models.client import Client
 from app.models.enums import FeeType, PaymentMode
 from app.models.fee_payment import FeePayment
 from app.models.user import User
-from app.services import fee_service
+from app.services import audit_service, fee_service
 
 router = APIRouter()
 
@@ -128,6 +128,12 @@ def record_fee(
     )
     db.add(fee)
     try:
+        db.flush()
+        audit_service.write_audit_log(
+            db, current_user.id, current_user.full_name, "fee.record", "fee",
+            fee.id, branch_id=client.branch_id,
+            meta={"amount": str(amount), "mode": PaymentMode(request.mode).value},
+        )
         db.commit()
     except IntegrityError:
         db.rollback()
@@ -152,6 +158,10 @@ def verify_fee(
     fee.verified = True
     fee.verified_by_id = current_user.id
     fee.verified_at = datetime.now(timezone.utc)
+    audit_service.write_audit_log(
+        db, current_user.id, current_user.full_name, "fee.verify", "fee",
+        fee.id, branch_id=fee.client.branch_id, meta={"amount": str(fee.amount)},
+    )
     db.commit()
     db.refresh(fee)
     return _serialize_fee(fee)
