@@ -467,6 +467,7 @@ def _serialize_client(c: Client, include_media: bool = True) -> dict[str, Any]:
 def get_loan_products(
     db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
 ):
+    _require_permission(db, current_user, "loans.view")
     products = db.scalars(
         select(LoanProduct).where(LoanProduct.is_active == True).order_by(LoanProduct.name)
     ).all()
