@@ -709,6 +709,10 @@ export default function ClientsPage() {
         return null;
 
       case 7:
+        if (!applicantIdPhoto) return "Applicant's government ID photo is required.";
+        if (!applicantPassportPhoto) return "Applicant's passport photo is required.";
+        if (!guarantorIdPhoto) return "Guarantor's government ID photo is required.";
+        if (!guarantorPassportPhoto) return "Guarantor's passport photo is required.";
         if (!applicantSignature) return "Applicant's signature is required.";
         if (!guarantorSignature) return "Guarantor's signature is required.";
         return null;
@@ -1392,8 +1396,8 @@ export default function ClientsPage() {
                       Applicant's Photos
                     </span>
                     <div className="grid grid-cols-2 gap-4">
-                      <PhotoUpload label="ID / National ID Photo" value={applicantIdPhoto} onChange={setApplicantIdPhoto} captureMode="environment" id="applicant-id-photo" />
-                      <PhotoUpload label="Passport Photo" value={applicantPassportPhoto} onChange={setApplicantPassportPhoto} captureMode="user" id="applicant-passport-photo" />
+                      <PhotoUpload label="ID / National ID Photo *" value={applicantIdPhoto} onChange={setApplicantIdPhoto} captureMode="environment" id="applicant-id-photo" />
+                      <PhotoUpload label="Passport Photo *" value={applicantPassportPhoto} onChange={setApplicantPassportPhoto} captureMode="user" id="applicant-passport-photo" />
                     </div>
                   </div>
 
@@ -1404,8 +1408,8 @@ export default function ClientsPage() {
                       Guarantor's Photos
                     </span>
                     <div className="grid grid-cols-2 gap-4">
-                      <PhotoUpload label="Guarantor ID Photo" value={guarantorIdPhoto} onChange={setGuarantorIdPhoto} captureMode="environment" id="guarantor-id-photo" />
-                      <PhotoUpload label="Guarantor Passport Photo" value={guarantorPassportPhoto} onChange={setGuarantorPassportPhoto} captureMode="user" id="guarantor-passport-photo" />
+                      <PhotoUpload label="Guarantor ID Photo *" value={guarantorIdPhoto} onChange={setGuarantorIdPhoto} captureMode="environment" id="guarantor-id-photo" />
+                      <PhotoUpload label="Guarantor Passport Photo *" value={guarantorPassportPhoto} onChange={setGuarantorPassportPhoto} captureMode="user" id="guarantor-passport-photo" />
                     </div>
                   </div>
 

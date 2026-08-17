@@ -367,6 +367,17 @@ def create_client(
     current_user: User = Depends(get_current_user),
 ):
     _require_permission(db, current_user, "clients.create")
+    required_kyc_images = (
+        "applicant_id_photo",
+        "applicant_passport_photo",
+        "guarantor_id_photo",
+        "guarantor_passport_photo",
+        "applicant_signature",
+        "guarantor_signature",
+    )
+    missing = next((f for f in required_kyc_images if not getattr(request, f)), None)
+    if missing:
+        raise HTTPException(status_code=400, detail=f"{missing.replace('_', ' ')} is required")
     client_number = loan_service._next_client_number(db)
     data = request.model_dump()
     data["branch_id"] = _resolve_branch_assignment(db, current_user, request.branch_id)
