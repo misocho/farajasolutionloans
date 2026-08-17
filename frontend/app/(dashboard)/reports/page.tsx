@@ -1,20 +1,29 @@
 "use client";
 
 import React, { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Banknote, Calendar, CheckCircle2, Flame, Loader2,
-  Receipt, RefreshCw,
+  Banknote, Calendar, CheckCircle2, Download, Flame, Loader2, Plus,
+  Receipt, RefreshCw, TrendingUp, X,
 } from "lucide-react";
 import {
   BarChart, Bar, Cell, Legend, Pie, PieChart,
   ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
+import { toast } from "sonner";
 
 import {
   fetchPortfolioReportApi, fetchArrearsReportApi, fetchCollectionsReportApi,
+  fetchPnlReportApi, fetchPnlSeriesApi, fetchExpensesApi,
+  createExpenseApi, verifyExpenseApi, fetchBranchesApi,
+  EXPENSE_CATEGORIES,
+  type PnlReport, type PnlSeriesPoint, type Expense, type ExpenseCreateData,
 } from "@/features/clients/api";
+import { fetchMeApi } from "@/features/auth/api";
 import { formatKES } from "@/app/lib/format";
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 
 const CHART_COLORS = ["#0D44A2", "#F57424", "#10B981", "#8B5CF6", "#EC4899", "#F59E0B", "#06B6D4"];
 
@@ -443,15 +452,499 @@ function CollectionsTab() {
   );
 }
 
+// ── Profit & Loss Report Tab ─────────────────────────────────────────────────
+
+const EXPENSE_MODES = ["Cash", "MPesa", "BankTransfer", "Cheque", "Other"];
+
+const fmtMonth = (iso: string) => {
+  const [y, m] = iso.split("-").map(Number);
+  return new Date(y, m - 1, 1).toLocaleDateString("en-KE", { month: "short", year: "2-digit" });
+};
+
+function StatementRow({ label, value, muted = false }: { label: string; value: string; muted?: boolean }) {
+  return (
+    <div className={`flex justify-between items-center py-1.5 ${muted ? "opacity-50" : ""}`}>
+      <span className="text-xs text-zinc-600 dark:text-zinc-300">{label}</span>
+      <span className="text-xs font-semibold text-zinc-800 dark:text-zinc-100 tabular-nums">{value}</span>
+    </div>
+  );
+}
+
+function PnlTab() {
+  const today = new Date();
+  const [month, setMonth] = useState(today.getMonth() + 1);
+  const [year, setYear] = useState(today.getFullYear());
+  const [branchId, setBranchId] = useState("all");
+  const [showExpenseForm, setShowExpenseForm] = useState(false);
+  const [category, setCategory] = useState<string>(EXPENSE_CATEGORIES[0]);
+  const [amount, setAmount] = useState("");
+  const [expenseDate, setExpenseDate] = useState(today.toISOString().slice(0, 10));
+  const [mode, setMode] = useState("Cash");
+  const [reference, setReference] = useState("");
+  const [description, setDescription] = useState("");
+  const [expenseBranchId, setExpenseBranchId] = useState("");
+
+  const queryClient = useQueryClient();
+  const { data: me } = useQuery({ queryKey: ["me"], queryFn: fetchMeApi });
+  const meName = me ? `${me.first_name} ${me.last_name}`.trim() : "";
+  const permissions = me?.permissions ?? [];
+  // Mirrors backend get_user_branch_ids: these roles are unrestricted even with branch rows
+  const myRole = me?.role ?? me?.roles?.[0] ?? "";
+  const isScoped = !["Director", "System Admin", "Auditor"].includes(myRole);
+
+  const periodFrom = `${year}-${String(month).padStart(2, "0")}-01`;
+  const periodTo = `${year}-${String(month).padStart(2, "0")}-${String(new Date(year, month, 0).getDate()).padStart(2, "0")}`;
+
+  const { data: pnl, isLoading, isError, refetch } = useQuery<PnlReport>({
+    queryKey: ["report-pnl", month, year, branchId],
+    queryFn: () => fetchPnlReportApi(month, year, branchId),
+  });
+  const { data: seriesData } = useQuery<{ series: PnlSeriesPoint[] }>({
+    queryKey: ["report-pnl-series", branchId],
+    queryFn: () => fetchPnlSeriesApi(6, branchId),
+  });
+  const { data: branches } = useQuery({ queryKey: ["branches"], queryFn: fetchBranchesApi, enabled: !isScoped });
+  const { data: expenses } = useQuery<Expense[]>({
+    queryKey: ["expenses", periodFrom, periodTo, branchId],
+    queryFn: () => fetchExpensesApi({ date_from: periodFrom, date_to: periodTo, branch_id: branchId }),
+  });
+
+  const invalidateAll = () => {
+    queryClient.invalidateQueries({ queryKey: ["report-pnl"] });
+    queryClient.invalidateQueries({ queryKey: ["report-pnl-series"] });
+    queryClient.invalidateQueries({ queryKey: ["expenses"] });
+  };
+
+  const createExpense = useMutation({
+    mutationFn: (payload: ExpenseCreateData) => createExpenseApi(payload),
+    onSuccess: () => {
+      toast.success("Expense recorded — pending approval");
+      setShowExpenseForm(false);
+      setAmount("");
+      setReference("");
+      setDescription("");
+      invalidateAll();
+    },
+    onError: (e: unknown) => toast.error((e as { response?: { data?: { detail?: string } } }).response?.data?.detail || "Failed to record expense"),
+  });
+
+  const verifyExpense = useMutation({
+    mutationFn: (id: string) => verifyExpenseApi(id),
+    onSuccess: () => {
+      toast.success("Expense approved");
+      invalidateAll();
+    },
+    onError: (e: unknown) => toast.error((e as { response?: { data?: { detail?: string } } }).response?.data?.detail || "Approval failed"),
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const value = parseFloat(amount);
+    if (!value || value <= 0) {
+      toast.error("Enter a valid amount");
+      return;
+    }
+    const branch = isScoped ? undefined : expenseBranchId || branches?.[0]?.id;
+    createExpense.mutate({
+      category: category as ExpenseCreateData["category"],
+      amount: value,
+      expense_date: expenseDate,
+      mode,
+      reference: reference || undefined,
+      description: description || undefined,
+      branch_id: branch,
+    });
+  };
+
+  const handleExport = () => {
+    if (!pnl) return;
+    const totalIncome = pnl.income.interest_income + pnl.income.application_fee_income;
+    const rows: (string | number)[][] = [
+      ["Faraja Solution Loans — Profit & Loss"],
+      [`Period`, `${pnl.period.month}/${pnl.period.year} (${pnl.period.from} to ${pnl.period.to})`],
+      ["Branch", pnl.branch_name ?? "All branches"],
+      [],
+      ["REVENUE", ""],
+      ["Interest income (loans disbursed)", pnl.income.interest_income],
+      ["Application fees (verified)", pnl.income.application_fee_income],
+      ["Unverified fees (pending)", pnl.income.unverified_fees],
+      ["Penalties accrued (uncollected)", pnl.income.penalties_accrued],
+      ["Total income", totalIncome],
+      [],
+      ["EXPENSES", ""],
+      ["Verified operating expenses", pnl.expenses.verified],
+      ["Unverified expenses (pending)", pnl.expenses.unverified],
+      ["Total expenses", pnl.expenses.verified],
+      [],
+      ["NET INCOME", pnl.net_income],
+      [],
+      ["ACTIVITY", ""],
+      ["Loans disbursed", pnl.activity.loans_disbursed],
+      ["Principal disbursed", pnl.activity.principal_disbursed],
+      ["Repayments collected", pnl.activity.repayments_collected],
+    ];
+    const csv = rows.map((r) => r.map((c) => `"${c}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `pnl-${pnl.period.year}-${String(pnl.period.month).padStart(2, "0")}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const totalIncome = pnl ? pnl.income.interest_income + pnl.income.application_fee_income : 0;
+  const chartData = (seriesData?.series ?? []).map((p) => ({
+    name: fmtMonth(p.month),
+    income: p.income,
+    expenses: p.expenses,
+    net: p.net,
+  }));
+
+  return (
+    <div className="space-y-4">
+      {/* Controls */}
+      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-4 rounded-[20px] shadow-sm">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="space-y-1">
+            <Label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Month</Label>
+            <select
+              value={month}
+              onChange={(e) => setMonth(Number(e.target.value))}
+              className="h-9 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 px-3 text-xs font-semibold text-zinc-800 dark:text-zinc-200 focus:outline-none"
+            >
+              {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+                <option key={m} value={m}>{new Date(year, m - 1, 1).toLocaleDateString("en-KE", { month: "long" })}</option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Year</Label>
+            <select
+              value={year}
+              onChange={(e) => setYear(Number(e.target.value))}
+              className="h-9 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 px-3 text-xs font-semibold text-zinc-800 dark:text-zinc-200 focus:outline-none"
+            >
+              {Array.from({ length: 6 }, (_, i) => today.getFullYear() - i).map((y) => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
+          </div>
+          {!isScoped && (
+            <div className="space-y-1 min-w-40 flex-1">
+              <Label className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Branch</Label>
+              <select
+                value={branchId}
+                onChange={(e) => setBranchId(e.target.value)}
+                className="h-9 w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 px-3 text-xs font-semibold text-zinc-800 dark:text-zinc-200 focus:outline-none"
+              >
+                <option value="all">All branches</option>
+                {(branches ?? []).map((b) => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+          <Button
+            variant="ghost"
+            onClick={handleExport}
+            disabled={!pnl}
+            className="h-9 rounded-xl text-xs font-bold gap-1.5"
+          >
+            <Download className="size-3.5" /> Export CSV
+          </Button>
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div className="flex justify-center py-12">
+          <Loader2 className="animate-spin size-6 text-zinc-400" />
+        </div>
+      ) : isError || !pnl ? (
+        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-8 rounded-[20px] text-center shadow-sm">
+          <p className="text-sm text-zinc-500">Could not load the report.</p>
+          <button onClick={() => refetch()} className="mt-3 text-xs font-bold text-[#0D44A2] flex items-center gap-1.5 mx-auto cursor-pointer">
+            <RefreshCw className="size-3.5" /> Retry
+          </button>
+        </div>
+      ) : (
+        <>
+          {/* KPI cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <KPICard label="Total Income" value={formatKES(totalIncome)} sub="Interest + application fees" color="text-[#0D44A2]" />
+            <KPICard label="Expenses" value={formatKES(pnl.expenses.verified)} sub={`${pnl.expenses.unverified ? `${formatKES(pnl.expenses.unverified)} pending approval` : "All approved"}`} color="text-[#F57424]" />
+            <KPICard label="Net Income" value={formatKES(pnl.net_income)} sub={pnl.net_income >= 0 ? "Profitable month" : "Loss-making month"} color={pnl.net_income >= 0 ? "text-emerald-600" : "text-rose-600"} />
+            <KPICard label="Collected" value={formatKES(pnl.activity.repayments_collected)} sub={`${pnl.activity.loans_disbursed} loans disbursed`} color="text-zinc-900 dark:text-zinc-50" />
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-4">
+            {/* Statement */}
+            <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-4 rounded-[20px] shadow-sm">
+              <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-2">
+                Profit &amp; Loss Statement — {pnl.period.month}/{pnl.period.year}
+                {pnl.branch_name ? ` · ${pnl.branch_name}` : ""}
+              </p>
+              <div className="border-t border-zinc-100 dark:border-zinc-800 pt-2">
+                <p className="text-[10px] font-black text-zinc-500 uppercase tracking-wider py-1">Revenue</p>
+                <StatementRow label="Interest income (loans disbursed)" value={formatKES(pnl.income.interest_income)} />
+                <StatementRow label="Application fees (verified)" value={formatKES(pnl.income.application_fee_income)} />
+                <StatementRow label="Unverified fees (pending approval)" value={formatKES(pnl.income.unverified_fees)} muted />
+                <StatementRow label="Penalties accrued (not yet collected)" value={formatKES(pnl.income.penalties_accrued)} muted />
+                <div className="flex justify-between items-center py-1.5 border-t border-zinc-100 dark:border-zinc-800 mt-1">
+                  <span className="text-xs font-black text-zinc-800 dark:text-zinc-100">Total Income</span>
+                  <span className="text-xs font-black text-zinc-800 dark:text-zinc-100 tabular-nums">{formatKES(totalIncome)}</span>
+                </div>
+              </div>
+              <div className="border-t border-zinc-100 dark:border-zinc-800 pt-2">
+                <p className="text-[10px] font-black text-zinc-500 uppercase tracking-wider py-1">Expenses</p>
+                <StatementRow label="Verified operating expenses" value={formatKES(pnl.expenses.verified)} />
+                <StatementRow label="Unverified expenses (pending approval)" value={formatKES(pnl.expenses.unverified)} muted />
+                <div className="flex justify-between items-center py-1.5 border-t border-zinc-100 dark:border-zinc-800 mt-1">
+                  <span className="text-xs font-black text-zinc-800 dark:text-zinc-100">Total Expenses</span>
+                  <span className="text-xs font-black text-zinc-800 dark:text-zinc-100 tabular-nums">{formatKES(pnl.expenses.verified)}</span>
+                </div>
+              </div>
+              <div className={`flex justify-between items-center py-2.5 mt-2 px-3 rounded-xl ${pnl.net_income >= 0 ? "bg-emerald-50 dark:bg-emerald-950/40" : "bg-rose-50 dark:bg-rose-950/40"}`}>
+                <span className="text-sm font-black text-zinc-900 dark:text-zinc-50">Net Income</span>
+                <span className={`text-sm font-black tabular-nums ${pnl.net_income >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
+                  {formatKES(pnl.net_income)}
+                </span>
+              </div>
+              <p className="text-[10px] text-zinc-400 mt-2">
+                Income recognized when loans disburse (flat interest); fees and expenses only when verified.
+              </p>
+            </div>
+
+            {/* Trend chart */}
+            <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-4 rounded-[20px] shadow-sm">
+              <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-2">Income vs Expenses — last 6 months</p>
+              <div className="h-56">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={chartData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+                    <XAxis dataKey="name" tick={{ fontSize: 10, fill: "#71717a" }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fontSize: 10, fill: "#71717a" }} axisLine={false} tickLine={false} tickFormatter={(v: number) => `${Math.round(v / 1000)}k`} width={36} />
+                    <Tooltip formatter={(v) => [formatKES(Number(v)), ""]} contentStyle={{ fontSize: 11, borderRadius: 12 }} />
+                    <Legend wrapperStyle={{ fontSize: 10 }} />
+                    <Bar dataKey="income" name="Income" fill="#0D44A2" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="expenses" name="Expenses" fill="#F57424" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+              <p className="text-[10px] text-zinc-400 mt-2">
+                Principal disbursed this period: {formatKES(pnl.activity.principal_disbursed)}
+              </p>
+            </div>
+          </div>
+
+          {/* Expenses */}
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-4 rounded-[20px] shadow-sm">
+            <div className="flex justify-between items-center mb-3">
+              <div>
+                <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Expenses</p>
+                <p className="text-xs text-zinc-500 mt-0.5">
+                  {expenses?.filter((e) => e.verified).length ?? 0} approved · {expenses?.filter((e) => !e.verified).length ?? 0} pending approval
+                </p>
+              </div>
+              {permissions.includes("expenses.create") && (
+                <Button
+                  onClick={() => setShowExpenseForm(true)}
+                  className="h-9 rounded-xl bg-[#0D44A2] hover:bg-[#0A3682] text-white text-xs font-bold shadow flex items-center gap-1.5"
+                >
+                  <Plus className="size-3.5" /> Record Expense
+                </Button>
+              )}
+            </div>
+            {!permissions.includes("expenses.view") ? (
+              <p className="text-xs text-zinc-400 py-4 text-center">You don&apos;t have permission to view expenses.</p>
+            ) : (expenses ?? []).length === 0 ? (
+              <p className="text-xs text-zinc-400 py-4 text-center">No expenses recorded for this period.</p>
+            ) : (
+              <div className="space-y-2">
+                {(expenses ?? []).map((e) => (
+                  <div key={e.id} className="flex items-center justify-between gap-3 p-3 rounded-xl bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-100 dark:border-zinc-800">
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-zinc-800 dark:text-zinc-100">
+                        {e.category} · {formatKES(e.amount)}
+                        <span className={`ml-2 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${e.verified ? "bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300" : "bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300"}`}>
+                          {e.verified ? "Approved" : "Pending"}
+                        </span>
+                      </p>
+                      <p className="text-[10px] text-zinc-400 truncate">
+                        {e.expense_date} · {e.branch_name ?? "No branch"} · {e.mode}
+                        {e.description ? ` — ${e.description}` : ""}
+                        {e.recorded_by ? ` · by ${e.recorded_by}` : ""}
+                      </p>
+                    </div>
+                    {!e.verified && permissions.includes("expenses.approve") && e.recorded_by !== meName && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => verifyExpense.mutate(e.id)}
+                        disabled={verifyExpense.isPending}
+                        className="h-8 rounded-lg text-[11px] font-bold text-emerald-600 gap-1.5 shrink-0"
+                      >
+                        <CheckCircle2 className="size-3.5" /> Approve
+                      </Button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* Modal: Record Expense */}
+      {showExpenseForm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-950/40 backdrop-blur-xs animate-fade-in">
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-[28px] p-6 w-full max-w-md shadow-2xl animate-in fade-in-50 zoom-in-95 duration-200 text-left max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center border-b border-zinc-100 dark:border-zinc-800 pb-3">
+              <div>
+                <h3 className="font-bold text-zinc-900 dark:text-zinc-50 text-base">Record Expense</h3>
+                <p className="text-xs text-zinc-400 mt-0.5">Needs approval before it counts in the P&amp;L.</p>
+              </div>
+              <button
+                onClick={() => setShowExpenseForm(false)}
+                className="p-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full cursor-pointer focus:outline-none"
+              >
+                <X className="size-5 text-zinc-500" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmit} className="space-y-4 mt-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor="expense-category" className="text-xs font-bold text-zinc-700 dark:text-zinc-300">Category</Label>
+                  <select
+                    id="expense-category"
+                    value={category}
+                    onChange={(e) => setCategory(e.target.value)}
+                    className="h-10 w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 px-3 text-sm text-zinc-800 dark:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  >
+                    {EXPENSE_CATEGORIES.map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="expense-amount" className="text-xs font-bold text-zinc-700 dark:text-zinc-300">Amount (KES)</Label>
+                  <Input
+                    id="expense-amount"
+                    type="number"
+                    min="1"
+                    step="0.01"
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value)}
+                    placeholder="e.g. 5000"
+                    className="h-10 rounded-xl border-zinc-200 dark:border-zinc-700 bg-zinc-50"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor="expense-date" className="text-xs font-bold text-zinc-700 dark:text-zinc-300">Date</Label>
+                  <Input
+                    id="expense-date"
+                    type="date"
+                    value={expenseDate}
+                    onChange={(e) => setExpenseDate(e.target.value)}
+                    className="h-10 rounded-xl border-zinc-200 dark:border-zinc-700 bg-zinc-50"
+                    required
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="expense-mode" className="text-xs font-bold text-zinc-700 dark:text-zinc-300">Mode</Label>
+                  <select
+                    id="expense-mode"
+                    value={mode}
+                    onChange={(e) => setMode(e.target.value)}
+                    className="h-10 w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 px-3 text-sm text-zinc-800 dark:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  >
+                    {EXPENSE_MODES.map((m) => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="expense-ref" className="text-xs font-bold text-zinc-700 dark:text-zinc-300">Reference (optional)</Label>
+                <Input
+                  id="expense-ref"
+                  type="text"
+                  value={reference}
+                  onChange={(e) => setReference(e.target.value)}
+                  placeholder="e.g. Invoice INV-1234"
+                  className="h-10 rounded-xl border-zinc-200 dark:border-zinc-700 bg-zinc-50"
+                />
+              </div>
+
+              {!isScoped && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="expense-branch" className="text-xs font-bold text-zinc-700 dark:text-zinc-300">Branch</Label>
+                  <select
+                    id="expense-branch"
+                    value={expenseBranchId || branches?.[0]?.id || ""}
+                    onChange={(e) => setExpenseBranchId(e.target.value)}
+                    className="h-10 w-full rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 px-3 text-sm text-zinc-800 dark:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  >
+                    {(branches ?? []).map((b) => (
+                      <option key={b.id} value={b.id}>{b.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div className="space-y-1.5">
+                <Label htmlFor="expense-desc" className="text-xs font-bold text-zinc-700 dark:text-zinc-300">Description (optional)</Label>
+                <Input
+                  id="expense-desc"
+                  type="text"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="What was it for?"
+                  className="h-10 rounded-xl border-zinc-200 dark:border-zinc-700 bg-zinc-50"
+                />
+              </div>
+
+              <div className="flex gap-2.5 justify-end pt-1">
+                <Button
+                  type="button"
+                  onClick={() => setShowExpenseForm(false)}
+                  variant="ghost"
+                  className="h-10 rounded-xl text-xs font-bold"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={createExpense.isPending}
+                  className="h-10 rounded-xl bg-[#0D44A2] hover:bg-[#0A3682] text-white text-xs font-bold shadow flex items-center gap-1.5"
+                >
+                  {createExpense.isPending && <Loader2 className="animate-spin size-3.5" />}
+                  Save Expense
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function ReportsPage() {
-  const [activeTab, setActiveTab] = useState<"portfolio" | "arrears" | "collections">("portfolio");
+  const [activeTab, setActiveTab] = useState<"portfolio" | "arrears" | "collections" | "pnl">("portfolio");
 
   const tabs = [
     { id: "portfolio" as const, label: "Portfolio", icon: Banknote },
     { id: "arrears" as const, label: "Arrears", icon: Flame },
     { id: "collections" as const, label: "Collections", icon: Receipt },
+    { id: "pnl" as const, label: "Profit & Loss", icon: TrendingUp },
   ];
 
   return (
@@ -460,7 +953,7 @@ export default function ReportsPage() {
       {/* Header */}
       <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-4 sm:p-5 rounded-[20px] sm:rounded-[24px] shadow-sm">
         <h2 className="text-lg sm:text-xl font-black text-zinc-900 dark:text-zinc-50 tracking-tight">Financial Reports</h2>
-        <p className="text-xs text-zinc-400 mt-0.5">Live data — Portfolio summary, Arrears with penalties, Collections by mode</p>
+        <p className="text-xs text-zinc-400 mt-0.5">Live data — Portfolio summary, Arrears with penalties, Collections by mode, Profit &amp; Loss</p>
       </div>
 
       {/* Tab bar */}
@@ -485,6 +978,7 @@ export default function ReportsPage() {
       {activeTab === "portfolio" && <PortfolioTab />}
       {activeTab === "arrears" && <ArrearsTab />}
       {activeTab === "collections" && <CollectionsTab />}
+      {activeTab === "pnl" && <PnlTab />}
     </div>
   );
 }

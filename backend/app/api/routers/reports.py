@@ -13,6 +13,7 @@ from __future__ import annotations
 from datetime import datetime, timezone, timedelta, date
 from decimal import Decimal
 from typing import Optional
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
@@ -21,8 +22,10 @@ from sqlalchemy.orm import Session, joinedload
 from app.api.dependencies.auth import get_current_user
 from app.core.permissions import get_user_permissions
 from app.db.session import get_db
+from app.models.branch import Branch
 from app.models.client import Client
 from app.models.enums import LoanStatus
+from app.models.expense import Expense
 from app.models.fee_payment import FeePayment
 from app.models.installment import Installment
 from app.models.loan import Loan
@@ -308,7 +311,7 @@ def get_executive_summary(
         ) or 0),
         "collections_this_month": float(db.scalar(
             select(func.coalesce(func.sum(Repayment.amount), 0)).where(
-                Repayment.verified == True, Repayment.date >= month_start
+                Repayment.verified, Repayment.date >= month_start
             )
         ) or 0),
         "disbursements_this_month": float(db.scalar(
@@ -323,7 +326,7 @@ def get_executive_summary(
         ) or 0),
         "fee_income_this_month": float(db.scalar(
             select(func.coalesce(func.sum(FeePayment.amount), 0)).where(
-                FeePayment.verified == True, FeePayment.verified_at >= month_start
+                FeePayment.verified, FeePayment.verified_at >= month_start
             )
         ) or 0),
     }
@@ -332,4 +335,212 @@ def get_executive_summary(
         "generated_at": today.isoformat(),
         "period_month": month_start.strftime("%B %Y"),
         **stats,
+    }
+
+
+# ── Profit & Loss Report ──────────────────────────────────────────────────────
+
+def _month_bounds(month: int, year: int) -> tuple[datetime, datetime]:
+    """Start (inclusive) and end (exclusive) datetimes for a calendar month."""
+    period_from = datetime(year, month, 1, tzinfo=timezone.utc)
+    period_to = datetime(year + 1, 1, 1, tzinfo=timezone.utc) if month == 12 else datetime(
+        year, month + 1, 1, tzinfo=timezone.utc
+    )
+    return period_from, period_to
+
+
+def _pnl_for_period(
+    db: Session, period_from: datetime, period_to: datetime, branch_id: UUID | None,
+    *, with_penalties: bool = True,
+) -> dict:
+    """Income/expense aggregations for one calendar month (accrual basis)."""
+    loan_filter = [
+        Loan.status.in_([LoanStatus.DISBURSED, LoanStatus.CLOSED]),
+        Loan.disbursed_date >= period_from,
+        Loan.disbursed_date < period_to,
+    ]
+    if branch_id:
+        loan_filter.append(Loan.branch_id == branch_id)
+
+    interest_income = db.scalar(
+        select(func.coalesce(func.sum(Loan.interest_amount), 0)).where(*loan_filter)
+    ) or Decimal("0")
+    principal_disbursed = db.scalar(
+        select(func.coalesce(func.sum(Loan.amount), 0)).where(*loan_filter)
+    ) or Decimal("0")
+    loans_disbursed = db.scalar(select(func.count()).select_from(Loan).where(*loan_filter)) or 0
+
+    fee_stmt = (
+        select(func.coalesce(func.sum(FeePayment.amount), 0))
+        .join(FeePayment.client)
+        .where(
+            FeePayment.verified,
+            FeePayment.verified_at >= period_from,
+            FeePayment.verified_at < period_to,
+        )
+    )
+    fee_stmt_un = (
+        select(func.coalesce(func.sum(FeePayment.amount), 0))
+        .join(FeePayment.client)
+        .where(
+            ~FeePayment.verified,
+            FeePayment.created_at >= period_from,
+            FeePayment.created_at < period_to,
+        )
+    )
+    if branch_id:
+        fee_stmt = fee_stmt.where(Client.branch_id == branch_id)
+        fee_stmt_un = fee_stmt_un.where(Client.branch_id == branch_id)
+    application_fee_income = db.scalar(fee_stmt) or Decimal("0")
+    unverified_fees = db.scalar(fee_stmt_un) or Decimal("0")
+
+    expense_filter = [
+        Expense.verified,
+        Expense.expense_date >= period_from.date(),
+        Expense.expense_date < period_to.date(),
+    ]
+    expense_filter_un = [
+        ~Expense.verified,
+        Expense.expense_date >= period_from.date(),
+        Expense.expense_date < period_to.date(),
+    ]
+    if branch_id:
+        expense_filter.append(Expense.branch_id == branch_id)
+        expense_filter_un.append(Expense.branch_id == branch_id)
+    verified_expenses = db.scalar(
+        select(func.coalesce(func.sum(Expense.amount), 0)).where(*expense_filter)
+    ) or Decimal("0")
+    unverified_expenses = db.scalar(
+        select(func.coalesce(func.sum(Expense.amount), 0)).where(*expense_filter_un)
+    ) or Decimal("0")
+
+    repay_stmt = (
+        select(func.coalesce(func.sum(Repayment.amount), 0))
+        .join(Repayment.loan)
+        .where(Repayment.verified, Repayment.date >= period_from, Repayment.date < period_to)
+    )
+    if branch_id:
+        repay_stmt = repay_stmt.where(Loan.branch_id == branch_id)
+    repayments_collected = db.scalar(repay_stmt) or Decimal("0")
+
+    penalties_accrued = Decimal("0")
+    if with_penalties:
+        period_loans = db.scalars(
+            select(Loan)
+            .options(joinedload(Loan.loan_product))
+            .where(*loan_filter)
+        ).unique().all()
+        for loan in period_loans:
+            if not loan.due_date or loan.loan_product is None:
+                continue
+            outstanding = get_outstanding(db, loan)
+            if outstanding <= 0:
+                continue
+            res = calculate_penalty(
+                outstanding,
+                loan.due_date,
+                loan.loan_product.penalty_rate,
+                loan.loan_product.penalty_interval_days,
+            )
+            penalties_accrued += Decimal(str(res["penalty"]))
+
+    return {
+        "interest_income": interest_income,
+        "application_fee_income": application_fee_income,
+        "verified_expenses": verified_expenses,
+        "unverified_fees": unverified_fees,
+        "unverified_expenses": unverified_expenses,
+        "penalties_accrued": penalties_accrued,
+        "loans_disbursed": loans_disbursed,
+        "principal_disbursed": principal_disbursed,
+        "repayments_collected": repayments_collected,
+    }
+
+
+@router.get("/pnl")
+def get_pnl_report(
+    month: int | None = Query(None, ge=1, le=12, description="1-12, defaults to current"),
+    year: int | None = Query(None, description="e.g. 2026, defaults to current"),
+    branch_id: UUID | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_permission(db, current_user, "reports.view")
+
+    now = datetime.now(timezone.utc)
+    m = month or now.month
+    y = year or now.year
+    period_from, period_to = _month_bounds(m, y)
+
+    data = _pnl_for_period(db, period_from, period_to, branch_id)
+    net_income = (
+        data["interest_income"] + data["application_fee_income"] - data["verified_expenses"]
+    )
+
+    branch_name = None
+    if branch_id:
+        branch = db.scalar(select(Branch).where(Branch.id == branch_id))
+        if not branch:
+            raise HTTPException(status_code=404, detail="Branch not found.")
+        branch_name = branch.name
+
+    return {
+        "generated_at": now.isoformat(),
+        "period": {
+            "month": m,
+            "year": y,
+            "from": period_from.date().isoformat(),
+            "to": (period_to - timedelta(days=1)).date().isoformat(),
+        },
+        "branch_id": str(branch_id) if branch_id else None,
+        "branch_name": branch_name,
+        "income": {
+            "interest_income": float(data["interest_income"]),
+            "application_fee_income": float(data["application_fee_income"]),
+            "unverified_fees": float(data["unverified_fees"]),
+            "penalties_accrued": float(data["penalties_accrued"]),
+        },
+        "expenses": {
+            "verified": float(data["verified_expenses"]),
+            "unverified": float(data["unverified_expenses"]),
+        },
+        "net_income": float(net_income),
+        "activity": {
+            "loans_disbursed": data["loans_disbursed"],
+            "principal_disbursed": float(data["principal_disbursed"]),
+            "repayments_collected": float(data["repayments_collected"]),
+        },
+    }
+
+
+@router.get("/pnl/series")
+def get_pnl_series(
+    months: int = Query(6, ge=1, le=24, description="Number of trailing months"),
+    branch_id: UUID | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    _require_permission(db, current_user, "reports.view")
+
+    now = datetime.now(timezone.utc)
+    current = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    series = []
+    for i in range(months - 1, -1, -1):
+        total = current.year * 12 + (current.month - 1) - i
+        m = total % 12 + 1
+        y = total // 12
+        period_from, period_to = _month_bounds(m, y)
+        data = _pnl_for_period(db, period_from, period_to, branch_id, with_penalties=False)
+        net = data["interest_income"] + data["application_fee_income"] - data["verified_expenses"]
+        series.append({
+            "month": f"{y:04d}-{m:02d}",
+            "income": float(data["interest_income"] + data["application_fee_income"]),
+            "expenses": float(data["verified_expenses"]),
+            "net": float(net),
+        })
+
+    return {
+        "generated_at": now.isoformat(),
+        "branch_id": str(branch_id) if branch_id else None,
+        "series": series,
     }

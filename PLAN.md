@@ -67,7 +67,7 @@
 
 ### Phase D — Reports & email notifications (P4–P5) · ~2 weeks
 
-- [ ] D1 Financial report (month/year per branch: active clients, disbursed, repayments, P&L, write-offs) + frontend tab, month/year picker, branch filter, export
+- [x] D1 Financial report (month/year per branch: active clients, disbursed, repayments, P&L, write-offs) — **P&L shipped 2026-08-17** (`GET /reports/pnl` + `GET /reports/pnl/series`, accrual interest at disbursement; verified-fee income; verified expenses; penalties memo; "Profit & Loss" tab with month/year/branch filters, CSV export, 6-month income-vs-expenses chart) — **write-offs still deferred** (loan write-off status + reporting not built). Includes the new **expense recording module** (`expenses` table, `GET/POST /expenses`, `POST /expenses/{id}/verify`, four-eyes: recorder cannot verify own expense; Director/System Admin/Auditor unrestricted; branch-scoped for LO/Manager)
 - [ ] D2 APScheduler daily job — due/arrears emails (T-2, due-today, arrears, past-maturity) + loan approved/disbursed → LO + penalty snapshot
 - [ ] D3 CSV export for existing reports
 
@@ -322,15 +322,13 @@ Director sends invite (Name + Email + Role + Branch)
 - [x] `GET /reports/collections?date_from=&date_to=` — by mode, per loan
 - [x] `GET /reports/clients` — by branch, by sector
 - [x] `GET /reports/summary`
-- [ ] **Financial report (month/year per branch: active clients, disbursed, repayments, profit/loss, write-offs)** — ❌ not built
+- [x] `GET /reports/pnl?month=&year=&branch_id=` + `GET /reports/pnl/series?months=&branch_id=` (2026-08-17) — accrual interest (disbursed+closed loans in period), verified fee income, verified expenses, penalties memo, per-branch filter
+- [ ] **Financial report: write-offs** — loan write-off status + reporting still not built (deferred from D1)
 - [ ] Report logic sits in router (`app/reports/` empty) — optional refactor
 
 ### Frontend
 - [x] Reports page — Portfolio / Arrears / Collections tabs, KPIs, charts, tables
-- [ ] Branch filter dropdown (Director = all; Manager = own branch) — ❌ missing (BranchSelector exists but no page reads it)
-- [ ] Month/year picker for financial report — ❌ missing (date-range inputs only)
-- [ ] Financial summary card: profit, losses, disbursed, collected — ❌ missing
-- [ ] Export buttons — ❌ missing
+- [x] "Profit & Loss" tab (2026-08-17) — month/year/branch filters, P&L statement, KPIs, 6-month chart, CSV export, Expense record/approve (four-eyes, branch-aware; own records can't self-approve)
 
 ---
 

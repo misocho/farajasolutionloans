@@ -380,6 +380,123 @@ export async function fetchClientsReportApi() {
   return res.data;
 }
 
+// ── Profit & Loss Report API ─────────────────────────────────────────────────
+
+export interface PnlReport {
+  generated_at: string;
+  period: { month: number; year: number; from: string; to: string };
+  branch_id: string | null;
+  branch_name: string | null;
+  income: {
+    interest_income: number;
+    application_fee_income: number;
+    unverified_fees: number;
+    penalties_accrued: number;
+  };
+  expenses: { verified: number; unverified: number };
+  net_income: number;
+  activity: {
+    loans_disbursed: number;
+    principal_disbursed: number;
+    repayments_collected: number;
+  };
+}
+
+export interface PnlSeriesPoint {
+  month: string;
+  income: number;
+  expenses: number;
+  net: number;
+}
+
+export async function fetchPnlReportApi(
+  month?: number,
+  year?: number,
+  branchId?: string,
+): Promise<PnlReport> {
+  const res = await api.get<PnlReport>("/reports/pnl", {
+    params: { month, year, branch_id: branchId === "all" ? undefined : branchId },
+  });
+  return res.data;
+}
+
+export async function fetchPnlSeriesApi(
+  months = 6,
+  branchId?: string,
+): Promise<{ series: PnlSeriesPoint[] }> {
+  const res = await api.get("/reports/pnl/series", {
+    params: { months, branch_id: branchId === "all" ? undefined : branchId },
+  });
+  return res.data;
+}
+
+// ── Expenses API ─────────────────────────────────────────────────────────────
+
+export const EXPENSE_CATEGORIES = [
+  "Salaries",
+  "Rent",
+  "Utilities",
+  "Transport",
+  "Marketing",
+  "Stationery",
+  "Operations",
+  "Other",
+] as const;
+
+export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
+
+export interface Expense {
+  id: string;
+  branch_id: string | null;
+  branch_name: string | null;
+  category: ExpenseCategory;
+  amount: number;
+  expense_date: string;
+  mode: string;
+  reference: string | null;
+  description: string | null;
+  recorded_by: string | null;
+  verified: boolean;
+  verified_by: string | null;
+  verified_at: string | null;
+  created_at: string;
+}
+
+export interface ExpenseCreateData {
+  category: ExpenseCategory;
+  amount: number;
+  expense_date?: string;
+  mode?: string;
+  reference?: string;
+  description?: string;
+  branch_id?: string;
+}
+
+export async function fetchExpensesApi(params?: {
+  date_from?: string;
+  date_to?: string;
+  branch_id?: string;
+  verified?: boolean;
+}): Promise<Expense[]> {
+  const res = await api.get<Expense[]>("/expenses", {
+    params: {
+      ...params,
+      branch_id: params?.branch_id === "all" ? undefined : params?.branch_id,
+    },
+  });
+  return res.data;
+}
+
+export async function createExpenseApi(data: ExpenseCreateData): Promise<Expense> {
+  const res = await api.post<Expense>("/expenses", data);
+  return res.data;
+}
+
+export async function verifyExpenseApi(id: string): Promise<Expense> {
+  const res = await api.post<Expense>(`/expenses/${id}/verify`);
+  return res.data;
+}
+
 // ── Client API ───────────────────────────────────────────────────────────────
 
 export async function fetchClientsApi(branchId?: string): Promise<Client[]> {
