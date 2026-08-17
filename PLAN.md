@@ -63,24 +63,24 @@
 - [x] C5 Partial-payment → Arrears verified end-to-end + partial-payment warning in repayments UI — staging-verified live (partial 500 on LN-2026-004: installment stays Pending, loan stays Arrears); record form now warns when amount < next unpaid installment (see P2 notes)
 - [x] C6 `PATCH /admin/loan-products/{id}` (penalty rate/interval config) — `GET /admin/loan-products` (all incl. inactive) + `PATCH /admin/loan-products/{id}` in `admin.py` (Director/System Admin gate via `check_is_director`); editable: penalty_rate (0–100%), penalty_interval_days (≥1), max_penalty_amount (≥0, null = no cap), is_active; 404/400 on unknown/missing, schema validation via `LoanProductUpdate`; Admin Console gains a "Loan Products" tab (list + edit modal with live-loan warning). Penalty still computed live from the product at assessment time
 - [x] C7 Google Maps link input + preview on client form — client detail drawer shows clickable "Open in Google Maps" rows for `residential_maps_link` / `business_maps_link` when set; the registration-form inputs + live preview were removed 2026-08-11 (owner decision — keep the backend fields, they're already accepted/serialized)
-- [ ] C8 Branch-scoping verification pass (LO/Manager see own branch only) + close permission-guard gaps (`GET /loan-products`, `/dashboard/stats`, `/notifications`) — ✅ notifications gap closed 2026-08-17 (branch-scoped + FO `loans.view`), remaining: `GET /loan-products`, `/dashboard/stats`
+- [x] C8 Branch-scoping verification pass (LO/Manager see own branch only) + close permission-guard gaps (`GET /loan-products`, `/dashboard/stats`, `/notifications`) — ✅ **completed 2026-08-17**: notifications gap closed (branch-scoped + FO `loans.view`); `GET /loan-products` now requires `loans.view` (was fully public); `/dashboard/stats` already gated `dashboard.view` + branch-scoped. Same-day write-side pass: every loan action, repayment record/verify, fee record/verify/quote, and expense verify calls `_assert_branch_visible` (scoped users get 403 outside their branch; previously any write-permission holder could act on any branch's records)
 - [x] C9 Notifications page + click-to-navigate (2026-08-17) — new `/notifications` page (KPI tiles Unread/Total/Critical, All/Unread toggle, Mark all read, 30s refetch) + sidebar nav item; bell dropdown rows navigate to the related record (`repayment_pending` → `/repayments`, loan-bearing types → `/loans?loan=<id>` → loan drawer); `GET /notifications` now branch-scoped server-side (`get_user_branch_ids`); Finance Officer gained `loans.view` in the seed (additive, reseeded on staging) so loan deep-links work for it; deep-link handlers migrated from render-time init to one-shot mount `useEffect` (React 19/Next 16 drops render-phase updates during SPA nav)
 
 ### Phase D — Reports & email notifications (P4–P5) · ~2 weeks
 
 - [x] D1 Financial report (month/year per branch: active clients, disbursed, repayments, P&L, write-offs) — **P&L shipped 2026-08-17** (`GET /reports/pnl` + `GET /reports/pnl/series`, accrual interest at disbursement; verified-fee income; verified expenses; penalties memo; "Profit & Loss" tab with month/year/branch filters, CSV export, 6-month income-vs-expenses chart) — **write-offs still deferred** (loan write-off status + reporting not built). Includes the new **expense recording module** (`expenses` table, `GET/POST /expenses`, `POST /expenses/{id}/verify`, four-eyes: recorder cannot verify own expense; Director/System Admin/Auditor unrestricted; branch-scoped for LO/Manager)
-- [ ] D2 APScheduler daily job — due/arrears emails (T-2, due-today, arrears, past-maturity) + loan approved/disbursed → LO + penalty snapshot
-- [ ] D3 CSV export for existing reports
+- [x] D2 APScheduler daily job — **shipped 2026-08-17**: `app/tasks/daily_jobs.py` + `app/tasks/scheduler.py` (08:00 EAT digest, 08:05 penalty snapshot, started in lifespan) — one due/arrears digest email per `loans.view` user (T-2 / due-tomorrow / due-today / arrears-past-maturity sections, branch-scoped + respect notification prefs); approved/disbursed emails to the submitting LO; `penalty_snapshots` table (loan_id, snapshot_date unique) persists daily outstanding/penalty/days_overdue for overdue disbursed loans (migration `3275d243045a`, applied local + Neon; verified live — 5 users emailed, 2 snapshot rows)
+- [x] D3 CSV export for existing reports — **shipped 2026-08-17**: Portfolio, Arrears, and Collections tabs each export their table via a shared `downloadCsv` helper (P&L already had CSV)
 
 ### Phase E — PDF & audit trail (P6, P7-C) · ~1 week
 
-- [ ] E1 `pdf_service.py` (ReportLab) + `GET /clients/{id}/pdf` + "Download Form PDF" button (signatures already captured)
-- [ ] E2 `audit_logs` table + event writes (approve/disburse/close, repayment/fee record+verify, client create) + `GET /audit-logs` + Audit Logs page (replaces dead button)
+- [x] E1 `pdf_service.py` (ReportLab) + `GET /clients/{id}/pdf` + Download button — **shipped 2026-08-17**: `app/services/pdf_service.py` builds a branded A4 KYC record (personal/spouse/dependants/business/next-of-kin/guarantor/properties, active-loans table, base64 photos+signatures when present); endpoint gated `clients.view` + branch-scoped (verified: LO 403 on Mombasa client); client drawer header gains an orange "PDF" download button (`fetchClientPdfApi`, blob download)
+- [x] E2 `audit_logs` table + event writes + `GET /audit-logs` + Audit Logs page — **shipped 2026-08-17**: `AuditLog` model (actor_id/actor_name, action, entity, entity_id, branch_id, JSONB meta) + `write_audit_log` service + `GET /audit-logs` (audit.view, filters action/entity/branch/date-range, branch-scoped) — writes on client create, loan create/approve/reject/disburse/close/notes/status_override, repayment record/verify, fee record/verify, expense record/verify (migration `0482b1f8e6ef`, applied local + Neon); frontend `/audit` page (filters, KPI tiles, table + mobile cards) + sidebar item gated on `audit.view`; verified live (Director 200, LO 403)
 
 ### Phase F — Production hardening · ~1 week
 
 - [ ] F1 Business answers: Lumpsum rate + company section in client form (needed for launch seed)
-- [ ] F2 Backend root `main.py` stub cleanup + register `/health`
+- [x] F2 Backend root `main.py` stub cleanup + register `/health` — **shipped 2026-08-17**: `backend/main.py` re-exports `app.main.app`; `GET /api/v1/health` registered (200 verified)
 - [ ] F3 S3 for photos/signatures + Neon prod DB + backup strategy + secret-rotation verification (Resend key, `SECRET_KEY`)
 - [ ] F4 Lint debt (84 pre-existing) + fix stale `make deploy` (uvx → /var/opt/uv) + refresh MANUAL_DEPLOY.md
 
@@ -163,8 +163,8 @@
 | Branches | ✅ Real DB | ✅ CRUD + stats | ⚠️ Duplicate unchecked `/branches` endpoint |
 | Reports (portfolio, arrears, collections, clients, summary) | ✅ Real DB | ✅ 3 tabs | ❌ Financial report (month/year) missing; no branch filter |
 | Notifications (in-app) | ✅ Real DB queries | ✅ 30s polling | ✅ Read-state persisted (2026-08-07) |
-| Email notifications (Resend) | ✅ Invite/approve/reset emails | — | ❌ Due/arrears alert jobs (APScheduler) missing |
-| PDF form generation + e-signature | ❌ Not started (reportlab installed) | ❌ No download button | |
+| Email notifications (Resend) | ✅ Invite/approve/reset/digest/loan-event emails | — | ✅ Due/arrears digest + approved/disbursed emails + penalty snapshot shipped 2026-08-17 (D2) |
+| PDF form generation + e-signature | ✅ `pdf_service.py` + `GET /clients/{id}/pdf` (2026-08-17) | ✅ Download button on client drawer | |
 | M-Pesa | ⏳ Future | — | |
 
 ### Seeded data
@@ -334,7 +334,7 @@ Director sends invite (Name + Email + Role + Branch)
 ---
 
 ## PRIORITY 5 — Notifications (In-App + Email via Resend)
-> **Status:** `[/]` In progress — in-app ✅, email jobs ❌
+> **Status:** `[x]` Done — in-app ✅, email jobs ✅ (2026-08-17)
 
 ### In-App
 - [x] `GET /notifications` — real DB queries (today/tomorrow dues, arrears, unverified repayments, pending approvals, overdue)
@@ -343,9 +343,9 @@ Director sends invite (Name + Email + Role + Branch)
 
 ### Email Notifications (Resend)
 - [x] `email_service.py` — invite / account-approved / password-reset templates
-- [ ] Loan approved → submitting LO · Loan disbursed → submitting LO
-- [ ] Due reminder T-2 → Manager · Due today → Manager · Arrears alert → Manager + Director · Past maturity/defaulter → Director
-- [ ] `app/tasks/` APScheduler daily job — scan active loans, trigger due/arrears alerts, penalty snapshot — ❌ empty (apscheduler in requirements but unused)
+- [x] Loan approved → submitting LO · Loan disbursed → submitting LO — ✅ 2026-08-17 (event emails in approve/disburse handlers)
+- [x] Due reminder T-2 → Manager · Due today → Manager · Arrears alert → Manager + Director · Past maturity/defaulter → Director — ✅ 2026-08-17: daily digest emailed to every `loans.view` holder within branch scope, respecting per-user notification prefs (D2)
+- [x] `app/tasks/` APScheduler daily job — scan active loans, trigger due/arrears alerts, penalty snapshot — ✅ 2026-08-17 (D2): `daily_jobs.py` + `scheduler.py`, 08:00/08:05 EAT via lifespan; `penalty_snapshots` table (migration `3275d243045a`)
 
 ---
 
