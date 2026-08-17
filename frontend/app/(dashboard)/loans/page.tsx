@@ -589,7 +589,7 @@ export default function LoansPage() {
   // Summary stats
   const pendingCount = loans.filter(l => l.status === "Pending").length;
   const overdueCount = loans.filter(l => l.is_overdue).length;
-  const totalPortfolio = loans.filter(l => l.status === "Disbursed").reduce((s, l) => s + l.outstanding, 0);
+  const totalPortfolio = loans.filter(l => l.db_status === "Disbursed").reduce((s, l) => s + l.outstanding, 0);
 
   return (
     <div className="space-y-4 sm:space-y-5 max-w-5xl mx-auto pb-16 select-none">
