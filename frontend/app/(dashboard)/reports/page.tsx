@@ -145,6 +145,19 @@ function PortfolioTab() {
     sector, amount, fill: CHART_COLORS[i % CHART_COLORS.length],
   }));
 
+  const handleExport = () => {
+    const rows: (string | number)[][] = [
+      ["Faraja Solution Loans — Portfolio Report"],
+      [],
+      ["Loan No.", "Client", "Sector", "Principal", "Outstanding", "Due"],
+      ...data.loans.map((l) => [
+        l.loan_number, l.client, l.sector || "Retail", l.principal, l.outstanding,
+        l.days_overdue > 0 ? `${l.days_overdue}d overdue` : l.days_to_due === 0 ? "Due today" : l.days_to_due !== null ? `in ${l.days_to_due}d` : "",
+      ]),
+    ];
+    downloadCsv("portfolio.csv", rows);
+  };
+
   return (
     <div className="space-y-5">
       {/* KPI Row */}
@@ -176,8 +189,11 @@ function PortfolioTab() {
 
       {/* Loans Table */}
       <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-[20px] shadow-sm overflow-hidden">
-        <div className="p-4 border-b border-zinc-100 dark:border-zinc-800">
+        <div className="p-4 border-b border-zinc-100 dark:border-zinc-800 flex justify-between items-center">
           <p className="text-xs font-black text-zinc-700 dark:text-zinc-300">Disbursed Loans</p>
+          <Button variant="ghost" onClick={handleExport} className="h-9 rounded-xl text-xs font-bold gap-1.5">
+            <Download className="size-3.5" /> Export CSV
+          </Button>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-xs text-left border-collapse">
@@ -237,6 +253,20 @@ function ArrearsTab() {
 
   const s = data.summary;
 
+  const handleExport = () => {
+    const rows: (string | number)[][] = [
+      ["Faraja Solution Loans — Arrears Report"],
+      [],
+      ["Loan No.", "Client", "Sector", "Due Date", "Days Overdue", "Outstanding", "Penalty"],
+      ...data.loans.map((l) => [
+        l.loan_number, l.client, l.sector || "Retail", l.due_date ?? "", l.days_overdue, l.outstanding, l.penalty,
+      ]),
+      [],
+      ["TOTAL EXPOSURE", "", "", "", "", s.total_overdue_amount, s.total_penalty],
+    ];
+    downloadCsv("arrears.csv", rows);
+  };
+
   return (
     <div className="space-y-5">
       {/* Summary */}
@@ -254,11 +284,16 @@ function ArrearsTab() {
         </div>
       ) : (
         <>
-          <div className="bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-800 rounded-2xl p-3 flex items-start gap-2">
-            <Flame className="size-4 text-rose-500 shrink-0 mt-0.5" />
-            <p className="text-xs text-rose-700 dark:text-rose-400">
-              <strong>{s.total_overdue_loans} loans</strong> are past their due date. Penalty accrues at <strong>3% every 2 days</strong> on the outstanding balance.
-            </p>
+          <div className="bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-800 rounded-2xl p-3 flex items-center justify-between gap-2">
+            <div className="flex items-start gap-2">
+              <Flame className="size-4 text-rose-500 shrink-0 mt-0.5" />
+              <p className="text-xs text-rose-700 dark:text-rose-400">
+                <strong>{s.total_overdue_loans} loans</strong> are past their due date. Penalty accrues at <strong>3% every 2 days</strong> on the outstanding balance.
+              </p>
+            </div>
+            <Button variant="ghost" onClick={handleExport} className="h-9 rounded-xl text-xs font-bold gap-1.5 shrink-0">
+              <Download className="size-3.5" /> Export CSV
+            </Button>
           </div>
 
           {/* Mobile cards */}
@@ -366,6 +401,17 @@ function CollectionsTab() {
   }
   const byLoanData = [...byLoanMap.values()];
 
+  const handleExport = () => {
+    const rows: (string | number)[][] = [
+      ["Faraja Solution Loans — Collections Report"],
+      ["Period", dateFrom || "all dates", dateTo || "all dates"],
+      [],
+      ["Loan No.", "Client", "Payments", "Total Collected"],
+      ...byLoanData.map((l) => [l.loan_number, l.client, l.count, l.amount]),
+    ];
+    downloadCsv("collections.csv", rows);
+  };
+
   return (
     <div className="space-y-5">
       {/* Date filter */}
@@ -416,8 +462,13 @@ function CollectionsTab() {
 
           {/* By Loan */}
           <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-[20px] shadow-sm overflow-hidden">
-            <div className="p-4 border-b border-zinc-100 dark:border-zinc-800">
+            <div className="p-4 border-b border-zinc-100 dark:border-zinc-800 flex justify-between items-center">
               <p className="text-xs font-black text-zinc-700 dark:text-zinc-300">Collections per Loan</p>
+              {byLoanData.length > 0 && (
+                <Button variant="ghost" onClick={handleExport} className="h-9 rounded-xl text-xs font-bold gap-1.5">
+                  <Download className="size-3.5" /> Export CSV
+                </Button>
+              )}
             </div>
             {byLoanData.length === 0 ? (
               <p className="text-xs text-zinc-400 text-center py-8">No verified payments in this period.</p>
@@ -460,6 +511,19 @@ const fmtMonth = (iso: string) => {
   const [y, m] = iso.split("-").map(Number);
   return new Date(y, m - 1, 1).toLocaleDateString("en-KE", { month: "short", year: "2-digit" });
 };
+
+function downloadCsv(filename: string, rows: (string | number)[][]) {
+  const csv = rows.map((r) => r.map((c) => `"${c}"`).join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
 
 function StatementRow({ label, value, muted = false }: { label: string; value: string; muted?: boolean }) {
   return (
