@@ -115,6 +115,7 @@ def verify_expense(
     expense = db.scalar(select(Expense).where(Expense.id == expense_id))
     if not expense:
         raise HTTPException(status_code=404, detail="Expense not found.")
+    _assert_branch_visible(db, current_user, expense.branch_id)
     if expense.verified:
         raise HTTPException(status_code=400, detail="Expense is already verified.")
     if expense.recorded_by_id == current_user.id:
@@ -140,6 +141,13 @@ def _resolve_branch_filter(db: Session, user: User, branch_id: UUID | None) -> l
             raise HTTPException(status_code=403, detail="Not allowed to view that branch.")
         return [branch_id]
     return branch_ids
+
+
+def _assert_branch_visible(db: Session, user: User, branch_id: UUID | None) -> None:
+    """403 when a scoped user cannot access the branch a record belongs to."""
+    branch_ids = get_user_branch_ids(db, user)
+    if branch_ids is not None and (branch_id is None or branch_id not in branch_ids):
+        raise HTTPException(status_code=403, detail="Not allowed to access that branch.")
 
 
 def _resolve_branch_assignment(db: Session, user: User, branch_id: UUID | None) -> UUID:

@@ -15,12 +15,12 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import false, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.dependencies.auth import get_current_user
-from app.core.permissions import get_user_permissions
+from app.core.permissions import get_user_branch_ids, get_user_permissions
 from app.db.session import get_db
 from app.models.client import Client
 from app.models.enums import FeeType, PaymentMode
@@ -37,6 +37,13 @@ def _require_permission(db: Session, user: User, perm: str) -> None:
     user_perms = get_user_permissions(db, user)
     if perm not in user_perms:
         raise HTTPException(status_code=403, detail=f"Permission '{perm}' required.")
+
+
+def _assert_branch_visible(db: Session, user: User, branch_id: UUID | None) -> None:
+    """403 when a scoped user cannot access the branch a record belongs to."""
+    branch_ids = get_user_branch_ids(db, user)
+    if branch_ids is not None and (branch_id is None or branch_id not in branch_ids):
+        raise HTTPException(status_code=403, detail="Not allowed to access that branch.")
 
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
@@ -59,6 +66,10 @@ def quote_fee(
     current_user: User = Depends(get_current_user),
 ):
     _require_permission(db, current_user, "fees.view")
+    client = db.get(Client, client_id)
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    _assert_branch_visible(db, current_user, client.branch_id)
     try:
         return fee_service.quote_application_fee(db, client_id, Decimal(str(amount)))
     except ValueError as e:
@@ -72,7 +83,17 @@ def list_fees(
     current_user: User = Depends(get_current_user),
 ):
     _require_permission(db, current_user, "fees.view")
-    stmt = select(FeePayment).order_by(FeePayment.created_at.desc())
+    branch_ids = get_user_branch_ids(db, current_user)
+    stmt = (
+        select(FeePayment)
+        .join(Client, FeePayment.client_id == Client.id)
+        .order_by(FeePayment.created_at.desc())
+    )
+    if branch_ids is not None:
+        if branch_ids:
+            stmt = stmt.where(Client.branch_id.in_(branch_ids))
+        else:
+            stmt = stmt.where(false())
     if client_id:
         stmt = stmt.where(FeePayment.client_id == client_id)
     fees = db.scalars(stmt).all()
@@ -89,6 +110,7 @@ def record_fee(
     client = db.get(Client, request.client_id)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
+    _assert_branch_visible(db, current_user, client.branch_id)
     amount = Decimal(str(request.amount))
     if amount <= 0:
         raise HTTPException(status_code=400, detail="Fee amount must be positive")
@@ -124,6 +146,7 @@ def verify_fee(
     fee = db.get(FeePayment, fee_id)
     if not fee:
         raise HTTPException(status_code=404, detail="Fee payment not found")
+    _assert_branch_visible(db, current_user, fee.client.branch_id)
     if fee.verified:
         raise HTTPException(status_code=400, detail="Already verified")
     fee.verified = True

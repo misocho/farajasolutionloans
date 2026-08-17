@@ -694,6 +694,7 @@ def approve_loan(
 ):
     _require_permission(db, current_user, "loans.approve")
     loan = _load_loan(loan_id, db)
+    _assert_branch_visible(db, current_user, loan.branch_id)
     try:
         loan_service.approve_loan(db, loan, current_user.id, request.note)
     except ValueError as e:
@@ -711,6 +712,7 @@ def reject_loan(
 ):
     _require_permission(db, current_user, "loans.approve")
     loan = _load_loan(loan_id, db)
+    _assert_branch_visible(db, current_user, loan.branch_id)
     try:
         loan_service.reject_loan(db, loan, current_user.id, request.note)
     except ValueError as e:
@@ -728,6 +730,7 @@ def disburse_loan(
 ):
     _require_permission(db, current_user, "loans.disburse")
     loan = _load_loan(loan_id, db)
+    _assert_branch_visible(db, current_user, loan.branch_id)
     if not loan.loan_product:
         raise HTTPException(status_code=400, detail="Loan has no product assigned")
     try:
@@ -746,6 +749,7 @@ def close_loan(
 ):
     _require_permission(db, current_user, "loans.disburse")
     loan = _load_loan(loan_id, db)
+    _assert_branch_visible(db, current_user, loan.branch_id)
     outstanding = loan_service.get_outstanding(db, loan)
     if outstanding > Decimal("0"):
         raise HTTPException(
@@ -769,6 +773,7 @@ def add_loan_note(
 ) -> dict[str, Any]:
     _require_permission(db, current_user, "loans.update")
     loan = _load_loan(loan_id, db)
+    _assert_branch_visible(db, current_user, loan.branch_id)
     now_nairobi = datetime.now(ZoneInfo(settings.DEFAULT_TIMEZONE))
     entry = f"[{now_nairobi:%d %b %Y %H:%M} — {current_user.full_name}] {request.note.strip()}"
     loan.notes = f"{loan.notes}\n{entry}" if loan.notes else entry
@@ -785,6 +790,7 @@ def set_loan_status_override(
 ) -> dict[str, Any]:
     _require_permission(db, current_user, "loans.update")
     loan = _load_loan(loan_id, db)
+    _assert_branch_visible(db, current_user, loan.branch_id)
     if loan.status != LoanStatus.DISBURSED:
         raise HTTPException(
             status_code=400,
@@ -871,6 +877,7 @@ def create_repayment(
     )
     if not loan:
         raise HTTPException(status_code=404, detail="Loan not found")
+    _assert_branch_visible(db, current_user, loan.branch_id)
     if loan.status != LoanStatus.DISBURSED:
         raise HTTPException(status_code=400, detail="Can only record repayments on disbursed loans")
 
@@ -928,6 +935,7 @@ def verify_repayment(
     )
     if not repayment:
         raise HTTPException(status_code=404, detail="Repayment not found")
+    _assert_branch_visible(db, current_user, repayment.loan.branch_id)
     if repayment.verified:
         raise HTTPException(status_code=400, detail="Already verified")
     repayment.verified = True
