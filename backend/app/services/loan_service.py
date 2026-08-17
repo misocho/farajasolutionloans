@@ -1,6 +1,7 @@
 """
 Loan service — business logic for loan lifecycle, interest, installments, and penalties.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
@@ -10,6 +11,7 @@ from uuid import UUID
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
+from app.core.time import as_nairobi_date, today_nairobi
 from app.models.client import Client
 from app.models.enums import InstallmentStatus, LoanStatus
 from app.models.installment import Installment
@@ -20,19 +22,27 @@ from app.models.repayment import Repayment
 
 # ── Auto-number helpers ────────────────────────────────────────────────────────
 
+
 def _next_client_number(db: Session) -> str:
-    year = datetime.now(timezone.utc).year
-    count = db.scalar(select(func.count()).select_from(Client)) or 0
-    return f"CL-{year}-{count + 1:03d}"
+    year = today_nairobi().year
+    last = db.scalar(
+        select(func.max(Client.client_number)).where(Client.client_number.like(f"CL-{year}-%"))
+    )
+    n = int(last.rsplit("-", 1)[1]) + 1 if last else 1
+    return f"CL-{year}-{n:03d}"
 
 
 def _next_loan_number(db: Session) -> str:
-    year = datetime.now(timezone.utc).year
-    count = db.scalar(select(func.count()).select_from(Loan)) or 0
-    return f"LN-{year}-{count + 1:03d}"
+    year = today_nairobi().year
+    last = db.scalar(
+        select(func.max(Loan.loan_number)).where(Loan.loan_number.like(f"LN-{year}-%"))
+    )
+    n = int(last.rsplit("-", 1)[1]) + 1 if last else 1
+    return f"LN-{year}-{n:03d}"
 
 
 # ── Interest & fee calculations ────────────────────────────────────────────────
+
 
 def calculate_interest(product: LoanProduct, amount: Decimal) -> Decimal:
     """Flat interest on principal."""
@@ -84,15 +94,23 @@ def calculate_penalty(
     due_date: datetime,
     penalty_rate: Decimal,
     interval_days: int,
+    max_penalty_amount: Decimal | None = None,
 ) -> dict:
-    """3% every 2 days on outstanding balance after due date."""
-    today = datetime.now(timezone.utc).date()
-    due = due_date.date() if due_date else None
+    """3% every 2 days on outstanding balance after due date.
+
+    `max_penalty_amount` caps the total penalty when the product defines one.
+    """
+    today = today_nairobi()
+    due = as_nairobi_date(due_date)
     if not due or today <= due:
         return {"days_overdue": 0, "penalty": Decimal("0")}
     days_overdue = (today - due).days
     periods = days_overdue // interval_days
-    penalty = (outstanding * penalty_rate * periods).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    penalty = (outstanding * penalty_rate * periods).quantize(
+        Decimal("0.01"), rounding=ROUND_HALF_UP
+    )
+    if max_penalty_amount is not None and penalty > max_penalty_amount:
+        penalty = max_penalty_amount
     return {"days_overdue": days_overdue, "penalty": penalty}
 
 
@@ -102,12 +120,17 @@ def get_computed_loan_status(loan: Loan, outstanding: Decimal) -> str:
     Returns one of: Pending, Approved, Disbursed, Almost Due, Due, Performing,
                     Arrears, Past Maturity, Defaulter, Closed, Rejected
     """
-    if loan.status in (LoanStatus.PENDING, LoanStatus.APPROVED, LoanStatus.REJECTED, LoanStatus.CLOSED):
+    if loan.status in (
+        LoanStatus.PENDING,
+        LoanStatus.APPROVED,
+        LoanStatus.REJECTED,
+        LoanStatus.CLOSED,
+    ):
         return loan.status.value
 
     if loan.status == LoanStatus.DISBURSED and loan.due_date:
-        today = datetime.now(timezone.utc).date()
-        due = loan.due_date.date()
+        today = today_nairobi()
+        due = as_nairobi_date(loan.due_date)
         days_overdue = (today - due).days
 
         if outstanding <= 0:
@@ -121,7 +144,9 @@ def get_computed_loan_status(loan: Loan, outstanding: Decimal) -> str:
         if (due - today).days <= 2:
             return "Almost Due"
         # Behind schedule: verified payments are short of what is due so far
-        due_to_date = sum(i.amount for i in loan.installments if i.due_date.date() <= today)
+        due_to_date = sum(
+            i.amount for i in loan.installments if as_nairobi_date(i.due_date) <= today
+        )
         expected_outstanding = loan.total_repayable - due_to_date
         if outstanding > expected_outstanding:
             return "Arrears"
@@ -134,19 +159,27 @@ def get_computed_loan_status(loan: Loan, outstanding: Decimal) -> str:
 
 # ── Installment schedule ────────────────────────────────────────────────────────
 
+
 def generate_installment_schedule(
     db: Session,
     loan: Loan,
     disbursed_date: datetime,
     num_weeks: int,
 ) -> list[Installment]:
-    """Create equal weekly installments starting 1 week after disbursement."""
+    """Create weekly installments starting 1 week after disbursement.
+
+    The last installment absorbs the rounding difference so the installments
+    always sum exactly to `total_repayable` — otherwise an uneven division
+    leaves a sub-cent residual outstanding and the loan can never close.
+    """
     installments = []
+    base = loan.installment_amount
+    last_amount = loan.total_repayable - base * (num_weeks - 1)
     for week in range(1, num_weeks + 1):
         inst = Installment(
             loan_id=loan.id,
             due_date=disbursed_date + timedelta(weeks=week),
-            amount=loan.installment_amount,
+            amount=last_amount if week == num_weeks else base,
             status=InstallmentStatus.PENDING,
         )
         db.add(inst)
@@ -156,6 +189,7 @@ def generate_installment_schedule(
 
 
 # ── Loan lifecycle actions ──────────────────────────────────────────────────────
+
 
 def approve_loan(db: Session, loan: Loan, approver_id: UUID, note: str | None = None) -> Loan:
     if loan.status != LoanStatus.PENDING:
@@ -210,15 +244,18 @@ def close_loan(db: Session, loan: Loan, closer_id: UUID) -> Loan:
 
 # ── Outstanding balance ─────────────────────────────────────────────────────────
 
+
 def get_outstanding(db: Session, loan: Loan) -> Decimal:
     verified_paid = db.scalar(
-        select(func.coalesce(func.sum(Repayment.amount), 0))
-        .where(Repayment.loan_id == loan.id, Repayment.verified == True)
+        select(func.coalesce(func.sum(Repayment.amount), 0)).where(
+            Repayment.loan_id == loan.id, Repayment.verified == True
+        )
     ) or Decimal("0")
     return max(loan.total_repayable - Decimal(str(verified_paid)), Decimal("0"))
 
 
 # ── Installment payment status ──────────────────────────────────────────────────
+
 
 def mark_installments_paid(db: Session, loan: Loan) -> None:
     """
@@ -226,14 +263,13 @@ def mark_installments_paid(db: Session, loan: Loan) -> None:
     An installment is paid only when cumulative verified payments fully cover it.
     """
     paid_total = db.scalar(
-        select(func.coalesce(func.sum(Repayment.amount), 0))
-        .where(Repayment.loan_id == loan.id, Repayment.verified == True)
+        select(func.coalesce(func.sum(Repayment.amount), 0)).where(
+            Repayment.loan_id == loan.id, Repayment.verified == True
+        )
     ) or Decimal("0")
 
     installments = db.scalars(
-        select(Installment)
-        .where(Installment.loan_id == loan.id)
-        .order_by(Installment.due_date)
+        select(Installment).where(Installment.loan_id == loan.id).order_by(Installment.due_date)
     ).all()
 
     remaining = Decimal(str(paid_total))

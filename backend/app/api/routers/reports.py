@@ -8,6 +8,7 @@ Endpoints:
   GET /reports/clients      — Client portfolio stats
   GET /reports/summary      — High-level executive summary
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta, date
@@ -21,6 +22,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.api.dependencies.auth import get_current_user
 from app.core.permissions import get_user_permissions
+from app.core.time import as_nairobi_date, today_nairobi, utc_instant
 from app.db.session import get_db
 from app.models.branch import Branch
 from app.models.client import Client
@@ -44,19 +46,26 @@ def _require_permission(db: Session, user: User, perm: str) -> None:
 
 # ── Portfolio Report ───────────────────────────────────────────────────────────
 
+
 @router.get("/portfolio")
 def get_portfolio_report(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     _require_permission(db, current_user, "reports.view")
-    loans = db.scalars(
-        select(Loan)
-        .options(joinedload(Loan.client), joinedload(Loan.loan_product), joinedload(Loan.branch))
-        .where(Loan.status == LoanStatus.DISBURSED)
-    ).unique().all()
+    loans = (
+        db.scalars(
+            select(Loan)
+            .options(
+                joinedload(Loan.client), joinedload(Loan.loan_product), joinedload(Loan.branch)
+            )
+            .where(Loan.status == LoanStatus.DISBURSED)
+        )
+        .unique()
+        .all()
+    )
 
-    today = datetime.now(timezone.utc).date()
+    today = today_nairobi()
     portfolio = []
     total_principal = Decimal("0")
     total_outstanding = Decimal("0")
@@ -69,9 +78,11 @@ def get_portfolio_report(
         is_overdue = False
         if loan.loan_product and loan.due_date:
             penalty_info = calculate_penalty(
-                outstanding, loan.due_date,
+                outstanding,
+                loan.due_date,
                 loan.loan_product.penalty_rate,
                 loan.loan_product.penalty_interval_days,
+                loan.loan_product.max_penalty_amount,
             )
             is_overdue = penalty_info["days_overdue"] > 0
 
@@ -81,25 +92,27 @@ def get_portfolio_report(
         if is_overdue:
             overdue_count += 1
 
-        due_date = loan.due_date.date() if loan.due_date else None
+        due_date = as_nairobi_date(loan.due_date)
         days_to_due = (due_date - today).days if due_date else None
 
-        portfolio.append({
-            "loan_number": loan.loan_number,
-            "client": loan.client.name if loan.client else "",
-            "branch": loan.branch.name if loan.branch else "",
-            "product": loan.loan_product.name if loan.loan_product else "",
-            "sector": loan.sector,
-            "principal": float(loan.amount),
-            "total_repayable": float(loan.total_repayable),
-            "outstanding": float(outstanding),
-            "days_overdue": penalty_info["days_overdue"],
-            "penalty": float(penalty_info["penalty"]),
-            "due_date": due_date.isoformat() if due_date else None,
-            "days_to_due": days_to_due,
-            "is_overdue": is_overdue,
-            "is_almost_due": days_to_due is not None and 0 < days_to_due <= 2,
-        })
+        portfolio.append(
+            {
+                "loan_number": loan.loan_number,
+                "client": loan.client.name if loan.client else "",
+                "branch": loan.branch.name if loan.branch else "",
+                "product": loan.loan_product.name if loan.loan_product else "",
+                "sector": loan.sector,
+                "principal": float(loan.amount),
+                "total_repayable": float(loan.total_repayable),
+                "outstanding": float(outstanding),
+                "days_overdue": penalty_info["days_overdue"],
+                "penalty": float(penalty_info["penalty"]),
+                "due_date": due_date.isoformat() if due_date else None,
+                "days_to_due": days_to_due,
+                "is_overdue": is_overdue,
+                "is_almost_due": days_to_due is not None and 0 < days_to_due <= 2,
+            }
+        )
 
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -117,18 +130,25 @@ def get_portfolio_report(
 
 # ── Arrears Report ────────────────────────────────────────────────────────────
 
+
 @router.get("/arrears")
 def get_arrears_report(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     _require_permission(db, current_user, "reports.view")
-    today = datetime.now(timezone.utc)
-    overdue_loans = db.scalars(
-        select(Loan)
-        .options(joinedload(Loan.client), joinedload(Loan.loan_product), joinedload(Loan.branch))
-        .where(Loan.status == LoanStatus.DISBURSED, Loan.due_date < today)
-    ).unique().all()
+    today_dt = utc_instant(today_nairobi())
+    overdue_loans = (
+        db.scalars(
+            select(Loan)
+            .options(
+                joinedload(Loan.client), joinedload(Loan.loan_product), joinedload(Loan.branch)
+            )
+            .where(Loan.status == LoanStatus.DISBURSED, Loan.due_date < today_dt)
+        )
+        .unique()
+        .all()
+    )
 
     arrears = []
     total_overdue_amount = Decimal("0")
@@ -141,27 +161,32 @@ def get_arrears_report(
         penalty_info = {"days_overdue": 0, "penalty": Decimal("0")}
         if loan.loan_product:
             penalty_info = calculate_penalty(
-                outstanding, loan.due_date,
+                outstanding,
+                loan.due_date,
                 loan.loan_product.penalty_rate,
                 loan.loan_product.penalty_interval_days,
+                loan.loan_product.max_penalty_amount,
             )
+        due_date = as_nairobi_date(loan.due_date)
 
         total_overdue_amount += outstanding
         total_penalty += Decimal(str(penalty_info["penalty"]))
 
-        arrears.append({
-            "loan_number": loan.loan_number,
-            "client": loan.client.name if loan.client else "",
-            "client_phone": loan.client.phone if loan.client else "",
-            "branch": loan.branch.name if loan.branch else "",
-            "sector": loan.sector,
-            "principal": float(loan.amount),
-            "outstanding": float(outstanding),
-            "days_overdue": penalty_info["days_overdue"],
-            "penalty": float(penalty_info["penalty"]),
-            "total_due": float(outstanding + Decimal(str(penalty_info["penalty"]))),
-            "due_date": loan.due_date.date().isoformat() if loan.due_date else None,
-        })
+        arrears.append(
+            {
+                "loan_number": loan.loan_number,
+                "client": loan.client.name if loan.client else "",
+                "client_phone": loan.client.phone if loan.client else "",
+                "branch": loan.branch.name if loan.branch else "",
+                "sector": loan.sector,
+                "principal": float(loan.amount),
+                "outstanding": float(outstanding),
+                "days_overdue": penalty_info["days_overdue"],
+                "penalty": float(penalty_info["penalty"]),
+                "total_due": float(outstanding + Decimal(str(penalty_info["penalty"]))),
+                "due_date": due_date.isoformat() if due_date else None,
+            }
+        )
 
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -176,6 +201,7 @@ def get_arrears_report(
 
 # ── Collections Report ────────────────────────────────────────────────────────
 
+
 @router.get("/collections")
 def get_collections_report(
     date_from: Optional[str] = Query(None, description="ISO date e.g. 2026-07-01"),
@@ -186,16 +212,28 @@ def get_collections_report(
     _require_permission(db, current_user, "reports.view")
 
     now = datetime.now(timezone.utc)
-    # Default: current calendar month
-    start_dt = datetime.fromisoformat(date_from).replace(tzinfo=timezone.utc) if date_from else now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    end_dt = datetime.fromisoformat(date_to).replace(tzinfo=timezone.utc) + timedelta(days=1) if date_to else now
+    # Default: current calendar month (Nairobi)
+    from_d = (
+        datetime.fromisoformat(date_from).date() if date_from else today_nairobi().replace(day=1)
+    )
+    to_d = datetime.fromisoformat(date_to).date() if date_to else today_nairobi()
+    start_dt = utc_instant(from_d)
+    end_dt = utc_instant(to_d + timedelta(days=1))
 
-    repayments = db.scalars(
-        select(Repayment)
-        .options(joinedload(Repayment.loan), joinedload(Repayment.client), joinedload(Repayment.recorded_by))
-        .where(Repayment.date >= start_dt, Repayment.date < end_dt)
-        .order_by(Repayment.date.desc())
-    ).unique().all()
+    repayments = (
+        db.scalars(
+            select(Repayment)
+            .options(
+                joinedload(Repayment.loan),
+                joinedload(Repayment.client),
+                joinedload(Repayment.recorded_by),
+            )
+            .where(Repayment.date >= start_dt, Repayment.date < end_dt)
+            .order_by(Repayment.date.desc())
+        )
+        .unique()
+        .all()
+    )
 
     verified = [r for r in repayments if r.verified]
     unverified = [r for r in repayments if not r.verified]
@@ -206,8 +244,8 @@ def get_collections_report(
     return {
         "generated_at": now.isoformat(),
         "period": {
-            "from": start_dt.date().isoformat(),
-            "to": end_dt.date().isoformat(),
+            "from": from_d.isoformat(),
+            "to": to_d.isoformat(),
         },
         "summary": {
             "total_repayments": len(repayments),
@@ -235,6 +273,7 @@ def get_collections_report(
 
 # ── Clients Report ────────────────────────────────────────────────────────────
 
+
 @router.get("/clients")
 def get_clients_report(
     db: Session = Depends(get_db),
@@ -242,16 +281,22 @@ def get_clients_report(
 ):
     _require_permission(db, current_user, "reports.view")
 
-    clients = db.scalars(
-        select(Client).options(joinedload(Client.branch))
-    ).unique().all()
+    clients = db.scalars(select(Client).options(joinedload(Client.branch))).unique().all()
 
     report = []
     for client in clients:
-        loan_count = db.scalar(select(func.count()).select_from(Loan).where(Loan.client_id == client.id)) or 0
-        active_loans = db.scalar(select(func.count()).select_from(Loan).where(
-            Loan.client_id == client.id, Loan.status == LoanStatus.DISBURSED
-        )) or 0
+        loan_count = (
+            db.scalar(select(func.count()).select_from(Loan).where(Loan.client_id == client.id))
+            or 0
+        )
+        active_loans = (
+            db.scalar(
+                select(func.count())
+                .select_from(Loan)
+                .where(Loan.client_id == client.id, Loan.status == LoanStatus.DISBURSED)
+            )
+            or 0
+        )
         total_borrowed = db.scalar(
             select(func.coalesce(func.sum(Loan.amount), 0)).where(Loan.client_id == client.id)
         ) or Decimal("0")
@@ -260,17 +305,19 @@ def get_clients_report(
                 Repayment.client_id == client.id, Repayment.verified == True
             )
         ) or Decimal("0")
-        report.append({
-            "client_number": client.client_number,
-            "name": client.name,
-            "phone": client.phone,
-            "branch": client.branch.name if client.branch else "",
-            "total_loans": loan_count,
-            "active_loans": active_loans,
-            "total_borrowed": float(total_borrowed),
-            "total_repaid": float(total_repaid),
-            "registered_at": client.created_at.isoformat() if client.created_at else None,
-        })
+        report.append(
+            {
+                "client_number": client.client_number,
+                "name": client.name,
+                "phone": client.phone,
+                "branch": client.branch.name if client.branch else "",
+                "total_loans": loan_count,
+                "active_loans": active_loans,
+                "total_borrowed": float(total_borrowed),
+                "total_repaid": float(total_repaid),
+                "registered_at": client.created_at.isoformat() if client.created_at else None,
+            }
+        )
 
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -284,6 +331,7 @@ def get_clients_report(
 
 # ── Executive Summary ─────────────────────────────────────────────────────────
 
+
 @router.get("/summary")
 def get_executive_summary(
     db: Session = Depends(get_db),
@@ -291,73 +339,119 @@ def get_executive_summary(
 ):
     _require_permission(db, current_user, "reports.view")
 
-    today = datetime.now(timezone.utc)
-    month_start = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    today = today_nairobi()
+    month_start = utc_instant(today.replace(day=1))
+    today_end = utc_instant(today + timedelta(days=1))
 
     stats = {
         "total_clients": db.scalar(select(func.count()).select_from(Client)) or 0,
         "total_loans": db.scalar(select(func.count()).select_from(Loan)) or 0,
-        "pending_loans": db.scalar(select(func.count()).select_from(Loan).where(Loan.status == LoanStatus.PENDING)) or 0,
-        "active_loans": db.scalar(select(func.count()).select_from(Loan).where(Loan.status == LoanStatus.DISBURSED)) or 0,
-        "closed_loans": db.scalar(select(func.count()).select_from(Loan).where(Loan.status == LoanStatus.CLOSED)) or 0,
-        "overdue_loans": db.scalar(select(func.count()).select_from(Loan).where(
-            Loan.status == LoanStatus.DISBURSED, Loan.due_date < today
-        )) or 0,
-        "total_disbursed": float(db.scalar(
-            select(func.coalesce(func.sum(Loan.amount), 0)).where(Loan.status.in_([LoanStatus.DISBURSED, LoanStatus.CLOSED]))
-        ) or 0),
-        "total_collected": float(db.scalar(
-            select(func.coalesce(func.sum(Repayment.amount), 0)).where(Repayment.verified == True)
-        ) or 0),
-        "collections_this_month": float(db.scalar(
-            select(func.coalesce(func.sum(Repayment.amount), 0)).where(
-                Repayment.verified, Repayment.date >= month_start
+        "pending_loans": db.scalar(
+            select(func.count()).select_from(Loan).where(Loan.status == LoanStatus.PENDING)
+        )
+        or 0,
+        "active_loans": db.scalar(
+            select(func.count()).select_from(Loan).where(Loan.status == LoanStatus.DISBURSED)
+        )
+        or 0,
+        "closed_loans": db.scalar(
+            select(func.count()).select_from(Loan).where(Loan.status == LoanStatus.CLOSED)
+        )
+        or 0,
+        "overdue_loans": db.scalar(
+            select(func.count())
+            .select_from(Loan)
+            .where(Loan.status == LoanStatus.DISBURSED, Loan.due_date < today_end)
+        )
+        or 0,
+        "total_disbursed": float(
+            db.scalar(
+                select(func.coalesce(func.sum(Loan.amount), 0)).where(
+                    Loan.status.in_([LoanStatus.DISBURSED, LoanStatus.CLOSED])
+                )
             )
-        ) or 0),
-        "disbursements_this_month": float(db.scalar(
-            select(func.coalesce(func.sum(Loan.amount), 0)).where(
-                Loan.status.in_([LoanStatus.DISBURSED, LoanStatus.CLOSED]),
-                Loan.disbursed_date >= month_start,
+            or 0
+        ),
+        "total_collected": float(
+            db.scalar(
+                select(func.coalesce(func.sum(Repayment.amount), 0)).where(
+                    Repayment.verified == True
+                )
             )
-        ) or 0),
-        "unverified_repayments": db.scalar(select(func.count()).select_from(Repayment).where(Repayment.verified == False)) or 0,
-        "fee_income": float(db.scalar(
-            select(func.coalesce(func.sum(FeePayment.amount), 0)).where(FeePayment.verified == True)
-        ) or 0),
-        "fee_income_this_month": float(db.scalar(
-            select(func.coalesce(func.sum(FeePayment.amount), 0)).where(
-                FeePayment.verified, FeePayment.verified_at >= month_start
+            or 0
+        ),
+        "collections_this_month": float(
+            db.scalar(
+                select(func.coalesce(func.sum(Repayment.amount), 0)).where(
+                    Repayment.verified, Repayment.date >= month_start
+                )
             )
-        ) or 0),
+            or 0
+        ),
+        "disbursements_this_month": float(
+            db.scalar(
+                select(func.coalesce(func.sum(Loan.amount), 0)).where(
+                    Loan.status.in_([LoanStatus.DISBURSED, LoanStatus.CLOSED]),
+                    Loan.disbursed_date >= month_start,
+                )
+            )
+            or 0
+        ),
+        "unverified_repayments": db.scalar(
+            select(func.count()).select_from(Repayment).where(Repayment.verified == False)
+        )
+        or 0,
+        "fee_income": float(
+            db.scalar(
+                select(func.coalesce(func.sum(FeePayment.amount), 0)).where(
+                    FeePayment.verified == True
+                )
+            )
+            or 0
+        ),
+        "fee_income_this_month": float(
+            db.scalar(
+                select(func.coalesce(func.sum(FeePayment.amount), 0)).where(
+                    FeePayment.verified, FeePayment.verified_at >= month_start
+                )
+            )
+            or 0
+        ),
     }
 
     return {
-        "generated_at": today.isoformat(),
-        "period_month": month_start.strftime("%B %Y"),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "period_month": today.strftime("%B %Y"),
         **stats,
     }
 
 
 # ── Profit & Loss Report ──────────────────────────────────────────────────────
 
-def _month_bounds(month: int, year: int) -> tuple[datetime, datetime]:
-    """Start (inclusive) and end (exclusive) datetimes for a calendar month."""
-    period_from = datetime(year, month, 1, tzinfo=timezone.utc)
-    period_to = datetime(year + 1, 1, 1, tzinfo=timezone.utc) if month == 12 else datetime(
-        year, month + 1, 1, tzinfo=timezone.utc
-    )
+
+def _month_bounds(month: int, year: int) -> tuple[date, date]:
+    """Nairobi calendar dates for a month: start (inclusive) and end (exclusive)."""
+    period_from = date(year, month, 1)
+    period_to = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
     return period_from, period_to
 
 
 def _pnl_for_period(
-    db: Session, period_from: datetime, period_to: datetime, branch_id: UUID | None,
-    *, with_penalties: bool = True,
+    db: Session,
+    period_from: date,
+    period_to: date,
+    branch_id: UUID | None,
+    *,
+    with_penalties: bool = True,
 ) -> dict:
     """Income/expense aggregations for one calendar month (accrual basis)."""
+    from_dt = utc_instant(period_from)
+    to_dt = utc_instant(period_to)
+
     loan_filter = [
         Loan.status.in_([LoanStatus.DISBURSED, LoanStatus.CLOSED]),
-        Loan.disbursed_date >= period_from,
-        Loan.disbursed_date < period_to,
+        Loan.disbursed_date >= from_dt,
+        Loan.disbursed_date < to_dt,
     ]
     if branch_id:
         loan_filter.append(Loan.branch_id == branch_id)
@@ -396,13 +490,13 @@ def _pnl_for_period(
 
     expense_filter = [
         Expense.verified,
-        Expense.expense_date >= period_from.date(),
-        Expense.expense_date < period_to.date(),
+        Expense.expense_date >= period_from,
+        Expense.expense_date < period_to,
     ]
     expense_filter_un = [
         ~Expense.verified,
-        Expense.expense_date >= period_from.date(),
-        Expense.expense_date < period_to.date(),
+        Expense.expense_date >= period_from,
+        Expense.expense_date < period_to,
     ]
     if branch_id:
         expense_filter.append(Expense.branch_id == branch_id)
@@ -425,11 +519,11 @@ def _pnl_for_period(
 
     penalties_accrued = Decimal("0")
     if with_penalties:
-        period_loans = db.scalars(
-            select(Loan)
-            .options(joinedload(Loan.loan_product))
-            .where(*loan_filter)
-        ).unique().all()
+        period_loans = (
+            db.scalars(select(Loan).options(joinedload(Loan.loan_product)).where(*loan_filter))
+            .unique()
+            .all()
+        )
         for loan in period_loans:
             if not loan.due_date or loan.loan_product is None:
                 continue
@@ -441,6 +535,7 @@ def _pnl_for_period(
                 loan.due_date,
                 loan.loan_product.penalty_rate,
                 loan.loan_product.penalty_interval_days,
+                loan.loan_product.max_penalty_amount,
             )
             penalties_accrued += Decimal(str(res["penalty"]))
 
@@ -468,8 +563,8 @@ def get_pnl_report(
     _require_permission(db, current_user, "reports.view")
 
     now = datetime.now(timezone.utc)
-    m = month or now.month
-    y = year or now.year
+    m = month or today_nairobi().month
+    y = year or today_nairobi().year
     period_from, period_to = _month_bounds(m, y)
 
     data = _pnl_for_period(db, period_from, period_to, branch_id)
@@ -489,8 +584,8 @@ def get_pnl_report(
         "period": {
             "month": m,
             "year": y,
-            "from": period_from.date().isoformat(),
-            "to": (period_to - timedelta(days=1)).date().isoformat(),
+            "from": period_from.isoformat(),
+            "to": (period_to - timedelta(days=1)).isoformat(),
         },
         "branch_id": str(branch_id) if branch_id else None,
         "branch_name": branch_name,
@@ -523,7 +618,8 @@ def get_pnl_series(
     _require_permission(db, current_user, "reports.view")
 
     now = datetime.now(timezone.utc)
-    current = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    ntoday = today_nairobi()
+    current = ntoday.replace(day=1)
     series = []
     for i in range(months - 1, -1, -1):
         total = current.year * 12 + (current.month - 1) - i
@@ -532,12 +628,14 @@ def get_pnl_series(
         period_from, period_to = _month_bounds(m, y)
         data = _pnl_for_period(db, period_from, period_to, branch_id, with_penalties=False)
         net = data["interest_income"] + data["application_fee_income"] - data["verified_expenses"]
-        series.append({
-            "month": f"{y:04d}-{m:02d}",
-            "income": float(data["interest_income"] + data["application_fee_income"]),
-            "expenses": float(data["verified_expenses"]),
-            "net": float(net),
-        })
+        series.append(
+            {
+                "month": f"{y:04d}-{m:02d}",
+                "income": float(data["interest_income"] + data["application_fee_income"]),
+                "expenses": float(data["verified_expenses"]),
+                "net": float(net),
+            }
+        )
 
     return {
         "generated_at": now.isoformat(),

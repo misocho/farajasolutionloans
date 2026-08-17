@@ -12,6 +12,7 @@ Generates real-time in-app notifications based on live database state:
 GET /notifications           — fetch all notifications for current user
 PATCH /notifications/read-all — mark all read (clears badge count)
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -23,6 +24,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.api.dependencies.auth import get_current_user
 from app.core.permissions import get_user_branch_ids, get_user_permissions
+from app.core.time import as_nairobi_date, today_nairobi, utc_instant
 from app.db.session import get_db
 from app.models.enums import LoanStatus
 from app.models.loan import Loan
@@ -30,6 +32,7 @@ from app.models.notification_pref import DEFAULT_PREFS, NotificationPref
 from app.models.notification_read import NotificationRead
 from app.models.repayment import Repayment
 from app.models.user import User
+from app.services.loan_service import get_outstanding
 from app.schemas.notifications import (
     NotificationPrefs,
     NotificationPrefsResponse,
@@ -59,10 +62,10 @@ def _priority(days_overdue: int) -> str:
 
 def _build_notifications(db: Session, current_user: User) -> list[dict]:
     """Compute all live notifications for the current user (no read flags)."""
-    now = datetime.now(UTC)
-    today = now.date()
+    today = today_nairobi()
     tomorrow = today + timedelta(days=1)
-    almost_due_threshold = today + timedelta(days=2)
+    day_after_tomorrow = today + timedelta(days=2)
+    now = datetime.now(UTC)
 
     notifications = []
     prefs = _get_prefs(db, current_user.id)
@@ -73,102 +76,140 @@ def _build_notifications(db: Session, current_user: User) -> list[dict]:
 
     # 1. Loans due today
     if prefs.get("due_today", True):
-        due_today = db.scalars(
-            select(Loan)
-            .options(joinedload(Loan.client))
-            .where(
-                Loan.status == LoanStatus.DISBURSED,
-                Loan.due_date >= datetime(today.year, today.month, today.day, tzinfo=UTC),
-                Loan.due_date < datetime(tomorrow.year, tomorrow.month, tomorrow.day, tzinfo=UTC),
-                *scoped,
+        due_today = (
+            db.scalars(
+                select(Loan)
+                .options(joinedload(Loan.client))
+                .where(
+                    Loan.status == LoanStatus.DISBURSED,
+                    Loan.due_date >= utc_instant(today),
+                    Loan.due_date < utc_instant(tomorrow),
+                    *scoped,
+                )
             )
-        ).unique().all()
+            .unique()
+            .all()
+        )
 
         for loan in due_today:
-            notifications.append({
-                "id": f"due-today-{loan.id}",
-                "type": "due_today",
-                "priority": "critical",
-                "title": "Loan Due Today",
-                "description": f"{loan.client.name} — {loan.loan_number} is due today. Outstanding: KES {loan.total_repayable:,.0f}",
-                "time": now.isoformat(),
-                "loan_id": str(loan.id),
-            })
+            outstanding = get_outstanding(db, loan)
+            if outstanding <= 0:
+                continue  # Fully repaid but not yet closed — not actually due
+            notifications.append(
+                {
+                    "id": f"due-today-{loan.id}",
+                    "type": "due_today",
+                    "priority": "critical",
+                    "title": "Loan Due Today",
+                    "description": (
+                        f"{loan.client.name} — {loan.loan_number} is due today. "
+                        f"Outstanding: KES {outstanding:,.0f}"
+                    ),
+                    "time": now.isoformat(),
+                    "loan_id": str(loan.id),
+                }
+            )
 
     # 2. Loans due tomorrow
     if prefs.get("due_tomorrow", True):
-        due_tomorrow = db.scalars(
-            select(Loan)
-            .options(joinedload(Loan.client))
-            .where(
-                Loan.status == LoanStatus.DISBURSED,
-                Loan.due_date >= datetime(tomorrow.year, tomorrow.month, tomorrow.day, tzinfo=UTC),
-                Loan.due_date < datetime((tomorrow + timedelta(days=1)).year,
-                                         (tomorrow + timedelta(days=1)).month,
-                                         (tomorrow + timedelta(days=1)).day, tzinfo=UTC),
-                *scoped,
+        due_tomorrow = (
+            db.scalars(
+                select(Loan)
+                .options(joinedload(Loan.client))
+                .where(
+                    Loan.status == LoanStatus.DISBURSED,
+                    Loan.due_date >= utc_instant(tomorrow),
+                    Loan.due_date < utc_instant(day_after_tomorrow),
+                    *scoped,
+                )
             )
-        ).unique().all()
+            .unique()
+            .all()
+        )
 
         for loan in due_tomorrow:
-            notifications.append({
-                "id": f"due-tomorrow-{loan.id}",
-                "type": "due_tomorrow",
-                "priority": "high",
-                "title": "Due Tomorrow",
-                "description": f"{loan.client.name} — {loan.loan_number} is due tomorrow.",
-                "time": now.isoformat(),
-                "loan_id": str(loan.id),
-            })
+            if get_outstanding(db, loan) <= 0:
+                continue
+            notifications.append(
+                {
+                    "id": f"due-tomorrow-{loan.id}",
+                    "type": "due_tomorrow",
+                    "priority": "high",
+                    "title": "Due Tomorrow",
+                    "description": f"{loan.client.name} — {loan.loan_number} is due tomorrow.",
+                    "time": now.isoformat(),
+                    "loan_id": str(loan.id),
+                }
+            )
 
     # 3. Almost due (within 2 days, not today or tomorrow)
     if prefs.get("almost_due", True):
-        day_after_tomorrow = tomorrow + timedelta(days=1)
-        almost_due = db.scalars(
-            select(Loan)
-            .options(joinedload(Loan.client))
-            .where(
-                Loan.status == LoanStatus.DISBURSED,
-                Loan.due_date >= datetime(day_after_tomorrow.year, day_after_tomorrow.month, day_after_tomorrow.day, tzinfo=UTC),
-                Loan.due_date < datetime(almost_due_threshold.year, almost_due_threshold.month, almost_due_threshold.day, tzinfo=UTC) + timedelta(days=1),
-                *scoped,
+        almost_due = (
+            db.scalars(
+                select(Loan)
+                .options(joinedload(Loan.client))
+                .where(
+                    Loan.status == LoanStatus.DISBURSED,
+                    Loan.due_date >= utc_instant(day_after_tomorrow),
+                    Loan.due_date < utc_instant(day_after_tomorrow + timedelta(days=1)),
+                    *scoped,
+                )
             )
-        ).unique().all()
+            .unique()
+            .all()
+        )
 
         for loan in almost_due:
-            notifications.append({
-                "id": f"almost-due-{loan.id}",
-                "type": "almost_due",
-                "priority": "medium",
-                "title": "Loan Almost Due",
-                "description": f"{loan.client.name} — {loan.loan_number} is due in 2 days ({loan.due_date.date().isoformat() if loan.due_date else ''}).",
-                "time": now.isoformat(),
-                "loan_id": str(loan.id),
-            })
+            if get_outstanding(db, loan) <= 0:
+                continue
+            due_display = as_nairobi_date(loan.due_date)
+            notifications.append(
+                {
+                    "id": f"almost-due-{loan.id}",
+                    "type": "almost_due",
+                    "priority": "medium",
+                    "title": "Loan Almost Due",
+                    "description": (
+                        f"{loan.client.name} — {loan.loan_number} is due in 2 days "
+                        f"({due_display.isoformat() if due_display else ''})."
+                    ),
+                    "time": now.isoformat(),
+                    "loan_id": str(loan.id),
+                }
+            )
 
     # 4. Overdue loans (arrears)
     if prefs.get("arrears", True):
-        overdue = db.scalars(
-            select(Loan)
-            .options(joinedload(Loan.client))
-            .where(
-                Loan.status == LoanStatus.DISBURSED,
-                Loan.due_date < datetime(today.year, today.month, today.day, tzinfo=UTC),
-                *scoped,
+        overdue = (
+            db.scalars(
+                select(Loan)
+                .options(joinedload(Loan.client))
+                .where(
+                    Loan.status == LoanStatus.DISBURSED,
+                    Loan.due_date < utc_instant(today),
+                    *scoped,
+                )
             )
-        ).unique().all()
+            .unique()
+            .all()
+        )
 
         for loan in overdue:
-            days = (today - loan.due_date.date()).days if loan.due_date else 0
-            notifications.append({
-                "id": f"arrears-{loan.id}",
-                "type": "arrears",
-                "priority": _priority(days),
-                "title": "Loan in Arrears",
-                "description": f"{loan.client.name} — {loan.loan_number} is {days} day{'s' if days != 1 else ''} overdue.",
-                "time": now.isoformat(),
-                "loan_id": str(loan.id),
-            })
+            if get_outstanding(db, loan) <= 0:
+                continue  # Fully repaid but not yet closed — not in arrears
+            due = as_nairobi_date(loan.due_date)
+            days = (today - due).days if due else 0
+            notifications.append(
+                {
+                    "id": f"arrears-{loan.id}",
+                    "type": "arrears",
+                    "priority": _priority(days),
+                    "title": "Loan in Arrears",
+                    "description": f"{loan.client.name} — {loan.loan_number} is {days} day{'s' if days != 1 else ''} overdue.",
+                    "time": now.isoformat(),
+                    "loan_id": str(loan.id),
+                }
+            )
 
     # 5. Unverified repayments
     if prefs.get("repayment_pending", True):
@@ -180,45 +221,55 @@ def _build_notifications(db: Session, current_user: User) -> list[dict]:
             .limit(20)
         )
         if branch_ids is not None:
-            unverified_query = (
-                unverified_query.join(Repayment.loan).where(Loan.branch_id.in_(branch_ids))
+            unverified_query = unverified_query.join(Repayment.loan).where(
+                Loan.branch_id.in_(branch_ids)
             )
         unverified = db.scalars(unverified_query).unique().all()
 
         for rep in unverified:
-            notifications.append({
-                "id": f"unverified-{rep.id}",
-                "type": "repayment_pending",
-                "priority": "medium",
-                "title": "Payment Awaiting Verification",
-                "description": f"KES {float(rep.amount):,.0f} from {rep.client.name if rep.client else 'client'} — recorded and pending Manager/Director approval.",
-                "time": rep.date.isoformat() if rep.date else now.isoformat(),
-                "repayment_id": str(rep.id),
-                "loan_id": str(rep.loan_id),
-            })
+            notifications.append(
+                {
+                    "id": f"unverified-{rep.id}",
+                    "type": "repayment_pending",
+                    "priority": "medium",
+                    "title": "Payment Awaiting Verification",
+                    "description": f"KES {float(rep.amount):,.0f} from {rep.client.name if rep.client else 'client'} — recorded and pending Manager/Director approval.",
+                    "time": rep.date.isoformat() if rep.date else now.isoformat(),
+                    "repayment_id": str(rep.id),
+                    "loan_id": str(rep.loan_id),
+                }
+            )
 
     # 6. Loans pending approval (for managers/directors)
     if prefs.get("pending_approval", True):
         user_perms = get_user_permissions(db, current_user)
         if "loans.approve" in user_perms:
-            pending_loans = db.scalars(
-                select(Loan)
-                .options(joinedload(Loan.client))
-                .where(Loan.status == LoanStatus.PENDING, *scoped)
-                .order_by(Loan.date_submitted.desc())
-                .limit(10)
-            ).unique().all()
+            pending_loans = (
+                db.scalars(
+                    select(Loan)
+                    .options(joinedload(Loan.client))
+                    .where(Loan.status == LoanStatus.PENDING, *scoped)
+                    .order_by(Loan.date_submitted.desc())
+                    .limit(10)
+                )
+                .unique()
+                .all()
+            )
 
             for loan in pending_loans:
-                notifications.append({
-                    "id": f"pending-approval-{loan.id}",
-                    "type": "pending_approval",
-                    "priority": "high",
-                    "title": "Loan Awaiting Approval",
-                    "description": f"{loan.client.name if loan.client else 'Client'} — {loan.loan_number} (KES {float(loan.amount):,.0f}) is awaiting your approval.",
-                    "time": loan.date_submitted.isoformat() if loan.date_submitted else now.isoformat(),
-                    "loan_id": str(loan.id),
-                })
+                notifications.append(
+                    {
+                        "id": f"pending-approval-{loan.id}",
+                        "type": "pending_approval",
+                        "priority": "high",
+                        "title": "Loan Awaiting Approval",
+                        "description": f"{loan.client.name if loan.client else 'Client'} — {loan.loan_number} (KES {float(loan.amount):,.0f}) is awaiting your approval.",
+                        "time": loan.date_submitted.isoformat()
+                        if loan.date_submitted
+                        else now.isoformat(),
+                        "loan_id": str(loan.id),
+                    }
+                )
 
     # Sort by priority: critical → high → medium → low
     priority_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}

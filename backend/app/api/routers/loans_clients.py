@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.api.dependencies.auth import get_current_user
 from app.core.permissions import get_user_branch_ids, get_user_permissions
+from app.core.time import as_nairobi_date
 from app.db.session import get_db
 from app.models.branch import Branch
 from app.models.client import Client
@@ -44,6 +45,7 @@ router = APIRouter()
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
+
 
 def _require_permission(db: Session, user: User, perm: str) -> None:
     user_perms = get_user_permissions(db, user)
@@ -124,8 +126,10 @@ def _enrich_loan(loan: Loan, db: Session) -> dict:
             loan.due_date,
             loan.loan_product.penalty_rate,
             loan.loan_product.penalty_interval_days,
+            loan.loan_product.max_penalty_amount,
         )
 
+    due_date_display = as_nairobi_date(loan.due_date)
     return {
         "id": str(loan.id),
         "loan_number": loan.loan_number,
@@ -151,9 +155,11 @@ def _enrich_loan(loan: Loan, db: Session) -> dict:
         "disbursed_by": _user_str(loan.disbursed_by),
         "date": loan.date_submitted.isoformat() if loan.date_submitted else None,
         "disbursed_date": loan.disbursed_date.isoformat() if loan.disbursed_date else None,
-        "due_date": loan.due_date.date().isoformat() if loan.due_date else None,
+        "due_date": due_date_display.isoformat() if due_date_display else None,
         "outstanding": float(outstanding),
-        "amount_repaid": float(loan.total_repayable - outstanding) if loan.status == LoanStatus.DISBURSED else 0.0,
+        "amount_repaid": float(loan.total_repayable - outstanding)
+        if loan.status == LoanStatus.DISBURSED
+        else 0.0,
         "is_overdue": penalty_info["days_overdue"] > 0,
         "days_overdue": penalty_info["days_overdue"],
         "penalty_amount": float(penalty_info["penalty"]),
@@ -168,6 +174,7 @@ def _user_str(user: User | None) -> str | None:
 
 
 # ── Request / Response Schemas ─────────────────────────────────────────────────
+
 
 class NextOfKinSchema(BaseModel):
     fullName: str
@@ -275,6 +282,7 @@ class RepaymentCreateRequest(BaseModel):
 
 
 # ── CLIENTS ────────────────────────────────────────────────────────────────────
+
 
 @router.get("/clients")
 def get_clients(
@@ -436,9 +444,14 @@ def _serialize_client(c: Client, include_media: bool = True) -> dict:
 
 # ── LOAN PRODUCTS ──────────────────────────────────────────────────────────────
 
+
 @router.get("/loan-products")
-def get_loan_products(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    products = db.scalars(select(LoanProduct).where(LoanProduct.is_active == True).order_by(LoanProduct.name)).all()
+def get_loan_products(
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_user)
+):
+    products = db.scalars(
+        select(LoanProduct).where(LoanProduct.is_active == True).order_by(LoanProduct.name)
+    ).all()
     return [
         {
             "id": str(p.id),
@@ -472,6 +485,7 @@ def quote_loan_estimate(
 
 
 # ── LOANS ──────────────────────────────────────────────────────────────────────
+
 
 @router.get("/loans")
 def get_loans(
@@ -532,7 +546,7 @@ def get_loan(
     result["installments"] = [
         {
             "id": str(i.id),
-            "due_date": i.due_date.date().isoformat(),
+            "due_date": (as_nairobi_date(i.due_date).isoformat() if i.due_date else None),
             "amount": float(i.amount),
             "status": i.status.value,
             "paid_at": i.paid_at.isoformat() if i.paid_at else None,
@@ -550,45 +564,55 @@ def get_installments_calendar(
 ):
     """Returns installments for active loans covering 6 months past + N weeks ahead."""
     _require_permission(db, current_user, "loans.view")
-    from datetime import datetime
     from datetime import timedelta
 
-    from app.core.time import today_nairobi
-    today = today_nairobi()
-    start = today - timedelta(days=180)
-    end = today + timedelta(weeks=weeks_ahead)
+    from app.core.time import as_nairobi_date, today_nairobi, utc_instant
 
-    rows = db.scalars(
-        select(Installment)
-        .join(Loan, Installment.loan_id == Loan.id)
-        .options(joinedload(Installment.loan).joinedload(Loan.client))
-        .where(
-            Loan.status == LoanStatus.DISBURSED,
-            Installment.due_date >= start,
-            Installment.due_date <= end,
+    today = today_nairobi()
+    start = utc_instant(today - timedelta(days=180))
+    end = utc_instant(today + timedelta(weeks=weeks_ahead, days=1))
+
+    rows = (
+        db.scalars(
+            select(Installment)
+            .join(Loan, Installment.loan_id == Loan.id)
+            .options(joinedload(Installment.loan).joinedload(Loan.client))
+            .where(
+                Loan.status == LoanStatus.DISBURSED,
+                Installment.due_date >= start,
+                Installment.due_date < end,
+            )
+            .order_by(Installment.due_date)
         )
-        .order_by(Installment.due_date)
-    ).unique().all()
+        .unique()
+        .all()
+    )
 
     events = []
     for i in rows:
-        due = i.due_date.date() if isinstance(i.due_date, datetime) else i.due_date
-        is_overdue = due < today and i.status.value.lower() != "paid"
-        events.append({
-            "id": str(i.id),
-            "loan_id": str(i.loan_id),
-            "loan_number": i.loan.loan_number if i.loan else "",
-            "client": i.loan.client.name if (i.loan and i.loan.client) else "",
-            "client_phone": i.loan.client.phone if (i.loan and i.loan.client) else "",
-            "due_date": due.isoformat(),
-            "amount": float(i.amount),
-            "status": i.status.value,
-            "is_overdue": is_overdue,
-            "is_today": due == today,
-            "days_overdue": (today - due).days if is_overdue else 0,
-        })
+        due = as_nairobi_date(i.due_date)
+        is_overdue = due is not None and due < today and i.status.value.lower() != "paid"
+        events.append(
+            {
+                "id": str(i.id),
+                "loan_id": str(i.loan_id),
+                "loan_number": i.loan.loan_number if i.loan else "",
+                "client": i.loan.client.name if (i.loan and i.loan.client) else "",
+                "client_phone": i.loan.client.phone if (i.loan and i.loan.client) else "",
+                "due_date": due.isoformat() if due else "",
+                "amount": float(i.amount),
+                "status": i.status.value,
+                "is_overdue": is_overdue,
+                "is_today": due == today,
+                "days_overdue": (today - due).days if is_overdue and due else 0,
+            }
+        )
 
-    return {"period": {"from": start.isoformat(), "to": end.isoformat()}, "total": len(events), "events": events}
+    return {
+        "period": {"from": start.isoformat(), "to": end.isoformat()},
+        "total": len(events),
+        "events": events,
+    }
 
 
 @router.post("/loans", status_code=status.HTTP_201_CREATED)
@@ -741,6 +765,7 @@ def _load_loan(loan_id: UUID, db: Session) -> Loan:
 
 # ── REPAYMENTS ─────────────────────────────────────────────────────────────────
 
+
 @router.get("/repayments")
 def get_repayments(
     loan_id: Optional[UUID] = Query(None),
@@ -781,7 +806,9 @@ def create_repayment(
     current_user: User = Depends(get_current_user),
 ):
     _require_permission(db, current_user, "repayments.record")
-    loan = db.scalar(select(Loan).options(joinedload(Loan.client)).where(Loan.id == request.loan_id))
+    loan = db.scalar(
+        select(Loan).options(joinedload(Loan.client)).where(Loan.id == request.loan_id)
+    )
     if not loan:
         raise HTTPException(status_code=404, detail="Loan not found")
     if loan.status != LoanStatus.DISBURSED:
@@ -831,7 +858,12 @@ def verify_repayment(
     _require_permission(db, current_user, "repayments.verify")
     repayment = db.scalar(
         select(Repayment)
-        .options(joinedload(Repayment.loan), joinedload(Repayment.client), joinedload(Repayment.recorded_by), joinedload(Repayment.verified_by))
+        .options(
+            joinedload(Repayment.loan),
+            joinedload(Repayment.client),
+            joinedload(Repayment.recorded_by),
+            joinedload(Repayment.verified_by),
+        )
         .where(Repayment.id == repayment_id)
     )
     if not repayment:
@@ -868,6 +900,7 @@ def _serialize_repayment(r: Repayment) -> dict:
 
 
 # ── DASHBOARD STATS ────────────────────────────────────────────────────────────
+
 
 @router.get("/dashboard/stats")
 def get_dashboard_stats(
@@ -1030,10 +1063,7 @@ def get_dashboard_stats(
     )
     if loan_cond is not None:
         stmt = stmt.where(loan_cond)
-    repaid_map = {
-        loan_id: float(amount)
-        for loan_id, amount in db.execute(stmt).all()
-    }
+    repaid_map = {loan_id: float(amount) for loan_id, amount in db.execute(stmt).all()}
 
     arrears_count = 0
     arrears_amount = 0.0
@@ -1106,47 +1136,59 @@ def get_dashboard_stats(
 
     events: list[dict] = []
     for r, loan_number, client_name in recent_repayments:
-        events.append({
-            "type": "repayment",
-            "title": f"Payment of KES {float(r.amount):,.0f} recorded",
-            "description": f"{client_name} · {loan_number} — {'verified' if r.verified else 'pending verification'}",
-            "time": r.date.isoformat(),
-        })
+        events.append(
+            {
+                "type": "repayment",
+                "title": f"Payment of KES {float(r.amount):,.0f} recorded",
+                "description": f"{client_name} · {loan_number} — {'verified' if r.verified else 'pending verification'}",
+                "time": r.date.isoformat(),
+            }
+        )
     for loan, client_name in recent_loans:
-        events.append({
-            "type": "loan",
-            "title": f"Loan application {loan.loan_number}",
-            "description": f"{client_name} · KES {float(loan.amount):,.0f}",
-            "time": loan.date_submitted.isoformat(),
-        })
+        events.append(
+            {
+                "type": "loan",
+                "title": f"Loan application {loan.loan_number}",
+                "description": f"{client_name} · KES {float(loan.amount):,.0f}",
+                "time": loan.date_submitted.isoformat(),
+            }
+        )
     for loan, client_name in recent_approvals:
-        events.append({
-            "type": "approval",
-            "title": f"Loan {loan.loan_number} approved",
-            "description": f"{client_name} · KES {float(loan.amount):,.0f}",
-            "time": loan.date_approved.isoformat(),
-        })
+        events.append(
+            {
+                "type": "approval",
+                "title": f"Loan {loan.loan_number} approved",
+                "description": f"{client_name} · KES {float(loan.amount):,.0f}",
+                "time": loan.date_approved.isoformat(),
+            }
+        )
     for loan, client_name in recent_disbursements:
-        events.append({
-            "type": "disbursement",
-            "title": f"Loan {loan.loan_number} disbursed",
-            "description": f"{client_name} · KES {float(loan.amount):,.0f}",
-            "time": loan.disbursed_date.isoformat(),
-        })
+        events.append(
+            {
+                "type": "disbursement",
+                "title": f"Loan {loan.loan_number} disbursed",
+                "description": f"{client_name} · KES {float(loan.amount):,.0f}",
+                "time": loan.disbursed_date.isoformat(),
+            }
+        )
     for client in recent_clients:
-        events.append({
-            "type": "client",
-            "title": "New client registered",
-            "description": client.name,
-            "time": client.created_at.isoformat(),
-        })
+        events.append(
+            {
+                "type": "client",
+                "title": "New client registered",
+                "description": client.name,
+                "time": client.created_at.isoformat(),
+            }
+        )
     for fee, client_name in recent_fees:
-        events.append({
-            "type": "fee",
-            "title": f"Application fee KES {float(fee.amount):,.0f}",
-            "description": f"{client_name} — {'verified' if fee.verified else 'pending verification'}",
-            "time": fee.created_at.isoformat(),
-        })
+        events.append(
+            {
+                "type": "fee",
+                "title": f"Application fee KES {float(fee.amount):,.0f}",
+                "description": f"{client_name} — {'verified' if fee.verified else 'pending verification'}",
+                "time": fee.created_at.isoformat(),
+            }
+        )
 
     events.sort(key=lambda e: e["time"], reverse=True)
     recent_activity = events[:8]
