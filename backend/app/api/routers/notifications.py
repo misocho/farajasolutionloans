@@ -71,7 +71,7 @@ def _build_notifications(db: Session, current_user: User) -> list[dict]:
     prefs = _get_prefs(db, current_user.id)
 
     # Branch scope: None = unrestricted roles (see all); list = scoped to those branches
-    branch_ids = get_user_branch_ids(current_user)
+    branch_ids = get_user_branch_ids(db, current_user)
     scoped = [] if branch_ids is None else [Loan.branch_id.in_(branch_ids)]
 
     # 1. Loans due today

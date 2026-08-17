@@ -134,10 +134,12 @@ ROLE_PERMISSIONS = {
             "users.delete",
             "roles.manage",
             "loans.writeoff",
+            "branches.view_all",
         }
     ],
     "Loan Officer": [
         "dashboard.view",
+        "branches.view",
         "clients.view",
         "clients.create",
         "clients.update",
@@ -150,6 +152,7 @@ ROLE_PERMISSIONS = {
     ],
     "Finance Officer": [
         "dashboard.view",
+        "branches.view",
         "loans.view",
         "repayments.view",
         "repayments.record",
@@ -174,6 +177,8 @@ ROLE_PERMISSIONS = {
         "fees.view",
         "reports.view",
         "audit.view",
+        "branches.view",
+        "branches.view_all",
     ],
 }
 

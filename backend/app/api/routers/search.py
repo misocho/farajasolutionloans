@@ -41,7 +41,7 @@ def global_search(
         return []
 
     pattern = f"%{term}%"
-    branch_ids = get_user_branch_ids(current_user)
+    branch_ids = get_user_branch_ids(db, current_user)
     results: list[dict] = []
 
     # ── Clients ──

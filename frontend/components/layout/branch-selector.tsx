@@ -42,9 +42,11 @@ export function BranchProvider({ children }: { children: React.ReactNode }) {
     staleTime: 5 * 60 * 1000,
   });
 
-  // Scoped users (LO/Manager) see only their assigned branches
+  // Users with branches.view_all (Director/System Admin/Auditor) see every branch;
+  // scoped users (LO/Manager/FO) see only their assigned branches
+  const canViewAll = me?.permissions?.includes("branches.view_all") ?? false;
   const visibleBranches =
-    me?.branch_ids && me.branch_ids.length > 0
+    !canViewAll && me?.branch_ids && me.branch_ids.length > 0
       ? branches.filter(b => me.branch_ids?.includes(b.id) && b.is_active)
       : branches.filter(b => b.is_active);
 

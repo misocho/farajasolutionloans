@@ -54,6 +54,7 @@ PERMISSIONS = [
 
     # Branches
     "branches.view",
+    "branches.view_all",
     "branches.manage",
 
     # Audit
@@ -83,15 +84,16 @@ def get_user_permissions(db: Session, user) -> set[str]:
     return set(rows)
 
 
-def get_user_branch_ids(user) -> list | None:
+def get_user_branch_ids(db: Session, user) -> list | None:
     """Branch scope for a user.
 
-    Returns None for unrestricted roles (Director, System Admin, Auditor).
-    Returns a list of branch UUIDs for scoped roles (Loan Officers, Managers).
-    An empty list means no branch assigned — callers must filter to nothing.
+    Returns None (unrestricted — sees everything) for users holding the
+    `branches.view_all` permission (granted to Director, System Admin,
+    Auditor). Returns a list of branch UUIDs for scoped users (Loan
+    Officers, Managers, Finance Officers). An empty list means no branch
+    assigned — callers must filter to nothing.
     """
-    UNRESTRICTED_ROLES = {"Director", "System Admin", "Auditor"}
-    role_names = {ur.role.name for ur in user.roles}
-    if role_names & UNRESTRICTED_ROLES:
+    perms = get_user_permissions(db, user)
+    if "branches.view_all" in perms:
         return None  # No filter — sees everything
     return [ub.branch_id for ub in user.branches]

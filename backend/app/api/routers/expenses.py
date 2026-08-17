@@ -64,7 +64,7 @@ def list_expenses(
 ):
     _require_permission(db, current_user, "expenses.view")
 
-    scope = _resolve_branch_filter(current_user, branch_id)
+    scope = _resolve_branch_filter(db, current_user, branch_id)
     stmt = select(Expense).order_by(Expense.expense_date.desc(), Expense.created_at.desc())
     if scope is not None:
         stmt = stmt.where(Expense.branch_id.in_(scope) if scope else False)
@@ -87,7 +87,7 @@ def create_expense(
 ):
     _require_permission(db, current_user, "expenses.create")
 
-    branch_id = _resolve_branch_assignment(current_user, request.branch_id, db)
+    branch_id = _resolve_branch_assignment(db, current_user, request.branch_id)
     expense = Expense(
         branch_id=branch_id,
         category=request.category,
@@ -132,9 +132,9 @@ def verify_expense(
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 
-def _resolve_branch_filter(user: User, branch_id: UUID | None) -> list | None:
+def _resolve_branch_filter(db: Session, user: User, branch_id: UUID | None) -> list | None:
     """None = unrestricted, [] = see nothing, list = allowed branch ids."""
-    branch_ids = get_user_branch_ids(user)
+    branch_ids = get_user_branch_ids(db, user)
     if branch_id is not None:
         if branch_ids is not None and branch_id not in branch_ids:
             raise HTTPException(status_code=403, detail="Not allowed to view that branch.")
@@ -142,9 +142,9 @@ def _resolve_branch_filter(user: User, branch_id: UUID | None) -> list | None:
     return branch_ids
 
 
-def _resolve_branch_assignment(user: User, branch_id: UUID | None, db: Session) -> UUID:
+def _resolve_branch_assignment(db: Session, user: User, branch_id: UUID | None) -> UUID:
     """Scoped users default to their first branch; unrestricted must supply one."""
-    branch_ids = get_user_branch_ids(user)
+    branch_ids = get_user_branch_ids(db, user)
     if branch_ids is not None:
         if branch_id is None:
             if not branch_ids:

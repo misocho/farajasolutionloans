@@ -58,13 +58,13 @@ def _require_permission(db: Session, user: User, perm: str) -> None:
 # ── Branch scoping ──────────────────────────────────────────────────────────────
 
 
-def _resolve_branch_filter(user: User, branch_id: UUID | None) -> list | None:
+def _resolve_branch_filter(db: Session, user: User, branch_id: UUID | None) -> list | None:
     """Resolve an explicit branch_id against the user's scope.
 
     Returns None = unrestricted, [] = see nothing, list = allowed branch ids.
     Raises 403 when the explicit branch is outside the user's scope.
     """
-    branch_ids = get_user_branch_ids(user)
+    branch_ids = get_user_branch_ids(db, user)
     if branch_id is not None:
         if branch_ids is not None and branch_id not in branch_ids:
             raise HTTPException(status_code=403, detail="Not allowed to view that branch.")
@@ -79,15 +79,15 @@ def _scoped_expr(column, scope: list | None):
     return column.in_(scope) if scope else False
 
 
-def _assert_branch_visible(user: User, branch_id: UUID | None) -> None:
+def _assert_branch_visible(db: Session, user: User, branch_id: UUID | None) -> None:
     """403 when a scoped user cannot access the branch a record belongs to."""
-    branch_ids = get_user_branch_ids(user)
+    branch_ids = get_user_branch_ids(db, user)
     if branch_ids is not None and (branch_id is None or branch_id not in branch_ids):
         raise HTTPException(status_code=403, detail="Not allowed to access that branch.")
 
 
 def _resolve_branch_assignment(
-    user: User, branch_id: UUID | None, db: Session, *, fallback: UUID | None = None
+    db: Session, user: User, branch_id: UUID | None, *, fallback: UUID | None = None
 ) -> UUID:
     """Resolve the branch a new record gets assigned to, enforcing user scope.
 
@@ -95,7 +95,7 @@ def _resolve_branch_assignment(
     branch outside their scope is a 403. Unrestricted users: an explicit
     branch must exist (400); missing branch falls back or is a 400.
     """
-    branch_ids = get_user_branch_ids(user)
+    branch_ids = get_user_branch_ids(db, user)
     if branch_ids is not None:
         if branch_id is None:
             if not branch_ids:
@@ -310,7 +310,7 @@ def get_clients(
     current_user: User = Depends(get_current_user),
 ):
     _require_permission(db, current_user, "clients.view")
-    scope = _resolve_branch_filter(current_user, branch_id)
+    scope = _resolve_branch_filter(db, current_user, branch_id)
     stmt = select(Client).order_by(Client.client_number.desc())
     if search:
         stmt = stmt.where(Client.name.ilike(f"%{search}%"))
@@ -332,7 +332,7 @@ def get_client(
     client = db.scalar(select(Client).where(Client.id == client_id))
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
-    _assert_branch_visible(current_user, client.branch_id)
+    _assert_branch_visible(db, current_user, client.branch_id)
     return _serialize_client(client)
 
 
@@ -345,7 +345,7 @@ def create_client(
     _require_permission(db, current_user, "clients.create")
     client_number = loan_service._next_client_number(db)
     data = request.model_dump()
-    data["branch_id"] = _resolve_branch_assignment(current_user, request.branch_id, db)
+    data["branch_id"] = _resolve_branch_assignment(db, current_user, request.branch_id)
     client = Client(
         client_number=client_number,
         registered_by_id=current_user.id,
@@ -368,10 +368,10 @@ def update_client(
     client = db.scalar(select(Client).where(Client.id == client_id))
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
-    _assert_branch_visible(current_user, client.branch_id)
+    _assert_branch_visible(db, current_user, client.branch_id)
     data = request.model_dump(exclude_unset=True)
     if "branch_id" in data:
-        data["branch_id"] = _resolve_branch_assignment(current_user, data["branch_id"], db)
+        data["branch_id"] = _resolve_branch_assignment(db, current_user, data["branch_id"])
     for k, v in data.items():
         if isinstance(v, list):
             setattr(client, k, [i.model_dump() if hasattr(i, "model_dump") else i for i in v])
@@ -514,7 +514,7 @@ def get_loans(
     current_user: User = Depends(get_current_user),
 ):
     _require_permission(db, current_user, "loans.view")
-    branch_ids = get_user_branch_ids(current_user)
+    scope = _resolve_branch_filter(db, current_user, branch_id)
     stmt = (
         select(Loan)
         .options(
@@ -530,15 +530,10 @@ def get_loans(
     )
     if client_id:
         stmt = stmt.where(Loan.client_id == client_id)
-    # Explicit branch filter from query param (Directors use this to drill into a branch)
-    if branch_id:
-        stmt = stmt.where(Loan.branch_id == branch_id)
-    # Branch scoping: LOs and Managers see only their branch
-    elif branch_ids is not None:
-        if branch_ids:
-            stmt = stmt.where(Loan.branch_id.in_(branch_ids))
-        else:
-            stmt = stmt.where(False)
+    # Branch scoping: explicit branch filter must stay inside the user's scope
+    cond = _scoped_expr(Loan.branch_id, scope)
+    if cond is not None:
+        stmt = stmt.where(cond)
 
     loans = db.scalars(stmt).unique().all()
     enriched = [_enrich_loan(loan, db) for loan in loans]
@@ -557,6 +552,7 @@ def get_loan(
 ):
     _require_permission(db, current_user, "loans.view")
     loan = _load_loan(loan_id, db)
+    _assert_branch_visible(db, current_user, loan.branch_id)
     result = _enrich_loan(loan, db)
     # Include installments
     installments = db.scalars(
@@ -645,7 +641,7 @@ def create_loan(
     client = db.scalar(select(Client).where(Client.id == request.client_id))
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
-    _assert_branch_visible(current_user, client.branch_id)
+    _assert_branch_visible(db, current_user, client.branch_id)
 
     product = db.scalar(select(LoanProduct).where(LoanProduct.id == request.loan_product_id))
     if not product:
@@ -670,7 +666,7 @@ def create_loan(
         client_id=request.client_id,
         loan_product_id=request.loan_product_id,
         branch_id=_resolve_branch_assignment(
-            current_user, request.branch_id, db, fallback=client.branch_id
+            db, current_user, request.branch_id, fallback=client.branch_id
         ),
         amount=amount,
         application_fee=fee,
@@ -839,7 +835,7 @@ def get_repayments(
     current_user: User = Depends(get_current_user),
 ):
     _require_permission(db, current_user, "repayments.view")
-    scope = _resolve_branch_filter(current_user, branch_id)
+    scope = _resolve_branch_filter(db, current_user, branch_id)
     stmt = (
         select(Repayment)
         .options(
@@ -974,7 +970,7 @@ def get_dashboard_stats(
 ):
     _require_permission(db, current_user, "dashboard.view")
 
-    scope = _resolve_branch_filter(current_user, branch_id)
+    scope = _resolve_branch_filter(db, current_user, branch_id)
     client_cond = _scoped_expr(Client.branch_id, scope)
     loan_cond = _scoped_expr(Loan.branch_id, scope)
 

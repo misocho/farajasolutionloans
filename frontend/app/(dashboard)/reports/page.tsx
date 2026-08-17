@@ -488,9 +488,8 @@ function PnlTab() {
   const { data: me } = useQuery({ queryKey: ["me"], queryFn: fetchMeApi });
   const meName = me ? `${me.first_name} ${me.last_name}`.trim() : "";
   const permissions = me?.permissions ?? [];
-  // Mirrors backend get_user_branch_ids: these roles are unrestricted even with branch rows
-  const myRole = me?.role ?? me?.roles?.[0] ?? "";
-  const isScoped = !["Director", "System Admin", "Auditor"].includes(myRole);
+  // Mirrors backend get_user_branch_ids: branches.view_all holders are unrestricted
+  const isScoped = !permissions.includes("branches.view_all");
 
   const periodFrom = `${year}-${String(month).padStart(2, "0")}-01`;
   const periodTo = `${year}-${String(month).padStart(2, "0")}-${String(new Date(year, month, 0).getDate()).padStart(2, "0")}`;

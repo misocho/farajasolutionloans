@@ -163,7 +163,7 @@ def get_branches(
     _require_permission(db, current_user, "branches.view")
     stmt = select(Branch).order_by(Branch.name)
     # Branch scoping: scoped roles (LO/Manager) see only their assigned branches
-    branch_ids = get_user_branch_ids(current_user)
+    branch_ids = get_user_branch_ids(db, current_user)
     if branch_ids is not None:
         stmt = stmt.where(Branch.id.in_(branch_ids) if branch_ids else False)
     branches = db.scalars(stmt).all()
@@ -180,7 +180,7 @@ def get_branch(
     branch = db.scalar(select(Branch).where(Branch.id == branch_id))
     if not branch:
         raise HTTPException(status_code=404, detail="Branch not found")
-    branch_ids = get_user_branch_ids(current_user)
+    branch_ids = get_user_branch_ids(db, current_user)
     if branch_ids is not None and branch.id not in branch_ids:
         raise HTTPException(status_code=403, detail="Not allowed to view that branch.")
     return _serialize_branch(branch, db)
