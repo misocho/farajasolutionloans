@@ -56,3 +56,5 @@ media/
 # Secrets
 *.pem
 *.key
+# Playwright MCP browser artifacts
+.playwright-mcp/
