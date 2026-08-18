@@ -1,3 +1,13 @@
+# Faraja Solution Loans — local development + single-droplet deployment.
+#
+# Default (`docker compose up -d`): starts only PostgreSQL for local dev
+# (uvicorn/pnpm run on the host, per root AGENTS.md).
+#
+# Full stack on a DigitalOcean droplet:
+#   cp backend/.env.example backend/.env   # then fill real values (see docs/DEPLOY.md)
+#   docker compose --profile deploy up -d --build
+#   → http://<droplet-ip>/ serves the app, /api/* proxies to FastAPI (docker/nginx.conf)
+
 services:
   postgres:
     image: postgres:16
@@ -12,6 +22,46 @@ services:
       - "5434:5432"
     volumes:
       - faraja_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d faraja"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: ./backend
+    env_file: ./backend/.env
+    environment:
+      APP_ENV: production
+      # Override with your public origin(s), e.g. CORS_ORIGINS=https://loans.example.com
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    profiles: ["deploy"]
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Same-origin path: nginx proxies /api/* to the backend.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/api/v1}
+    restart: unless-stopped
+    profiles: ["deploy"]
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./docker/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - backend
+      - frontend
+    restart: unless-stopped
+    profiles: ["deploy"]
 
 volumes:
   faraja_pgdata:

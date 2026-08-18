@@ -58,6 +58,9 @@ class Settings(BaseSettings):
     # Frontend
     FRONTEND_URL: str = "http://localhost:3000"
 
+    # CORS — comma-separated list of allowed browser origins
+    CORS_ORIGINS: str = "http://localhost:3000,https://faraja.enkaai.net"
+
     # Invite tokens
     INVITE_TOKEN_EXPIRE_HOURS: int = 72
 

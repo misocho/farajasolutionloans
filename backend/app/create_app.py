@@ -30,8 +30,7 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[
-            "http://localhost:3000",
-            "https://faraja.enkaai.net",
+            origin.strip() for origin in settings.CORS_ORIGINS.split(",") if origin.strip()
         ],
         allow_credentials=True,
         allow_methods=["*"],

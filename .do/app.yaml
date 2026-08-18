@@ -1,0 +1,77 @@
+# ── Faraja Solution Loans — DigitalOcean App Platform spec ───────────────────
+# Create the app in the DO dashboard (Apps → Create → Import from GitHub) or
+# with `doctl apps create --spec .do/app.yaml`, then set the REAL secret values
+# (SECRET_KEY, RESEND_API_KEY, NEXT_PUBLIC_API_URL) — placeholders fail on purpose.
+#
+# docs/DEPLOY.md has the full walkthrough.
+
+name: faraja
+region: nyc1
+
+services:
+  - name: backend
+    github:
+      repo: YOUR_GITHUB_USERNAME/farajasolutionloans   # ← set to your repo
+      branch: main
+      deploy_on_push: true
+    source_dir: backend
+    dockerfile_path: Dockerfile
+    http_port: 8000
+    instance_count: 1
+    instance_size_slug: apps-s-1vcpu-0.5gb
+    health_check:
+      http_path: /
+      initial_delay_seconds: 30
+    envs:
+      - key: APP_ENV
+        value: production
+        scope: RUN_TIME
+      - key: APP_DEBUG
+        value: "false"
+        scope: RUN_TIME
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "60"
+        scope: RUN_TIME
+      - key: SECRET_KEY
+        value: CHANGE_ME_use_a_long_random_string
+        scope: RUN_TIME
+      - key: RESEND_API_KEY
+        value: CHANGE_ME
+        scope: RUN_TIME
+      - key: RESEND_FROM_EMAIL
+        value: "Faraja Solution Loans <noreply@farajasolutions.co.ke>"
+        scope: RUN_TIME
+      - key: FRONTEND_URL
+        value: "${APP_URL}"
+        scope: RUN_TIME
+      - key: CORS_ORIGINS
+        value: "${APP_URL}"
+        scope: RUN_TIME
+      - key: DATABASE_URL
+        value: "${db.DATABASE_URL}"
+        scope: RUN_TIME
+
+  - name: frontend
+    github:
+      repo: YOUR_GITHUB_USERNAME/farajasolutionloans   # ← set to your repo
+      branch: main
+      deploy_on_push: true
+    source_dir: frontend
+    dockerfile_path: Dockerfile
+    http_port: 3000
+    instance_count: 1
+    instance_size_slug: apps-s-1vcpu-0.5gb
+    envs:
+      # Baked into the bundle at build time. Bindable vars like ${backend.APP_URL}
+      # are NOT available during Docker builds, so set the literal backend URL
+      # after the app is created (e.g. https://backend-faraja-xxxxx.ondigitalocean.app/api/v1).
+      - key: NEXT_PUBLIC_API_URL
+        value: "https://backend-faraja-CHANGE_ME.ondigitalocean.app/api/v1"
+        scope: BUILD_TIME
+
+databases:
+  # Creates a managed PostgreSQL cluster and injects ${db.DATABASE_URL} above.
+  - name: db
+    engine: PG
+    version: "16"
+    production: false
